@@ -37,14 +37,27 @@ The actuator commands are managed via `python-can` and GPS input is used for log
 
 Open your terminal and SSH into the Amiga Brain as per your usual procedure.
 
-### Step 2: Activate Virtual Environment
+### Step 2: Activate Virtual Environment 
+If your virtual environment is already created, activate it:
+
+### Step 3: Install Python can
+
+### Step 4: Start CAN Generator
+
+### Step 5: Open New Terminal for Next Steps
+### Step 6: Navigate to the GPS Client Directory
+### Step 7: Run the application
+
+
+
 
 If your virtual environment is already created, activate it:
 
 ```bash
 source venv/bin/activate
 
-### Step 1: SSH into the Amiga Brain
+### Step 2: Activate Virtual Environment
+
 
 ```bash
 pip install python-can
