@@ -44,7 +44,7 @@ If your virtual environment is already created, activate it:
 ```bash
 source venv/bin/activate
 
-### Step 3: Install Python CAN Module
+### Step 1: SSH into the Amiga Brain
 
 ```bash
 pip install python-can
