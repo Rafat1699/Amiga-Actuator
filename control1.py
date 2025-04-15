@@ -53,7 +53,8 @@ async def send_message_async(bus, arbitration_id, data, command=""):
     """Asynchronously send CAN message and log it."""
     msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=False)
     try:
-        await asyncio.to_thread(bus.send, msg)  # Non-blocking send using asyncio
+        # Using run_in_executor to handle the blocking operation of sending the CAN message
+        await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)  # Non-blocking send using run_in_executor
         print(f"✅ Sent: CAN ID {hex(arbitration_id)} Data {[hex(b) for b in data]}")
         log_event("CAN_SEND", actuator_id=arbitration_id, command=command)
     except can.CanError as e:
