@@ -53,15 +53,14 @@ async def send_message_async(bus, arbitration_id, data, command=""):
     """Asynchronously send CAN message and log it."""
     msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=False)
     try:
-        # Using run_in_executor to handle the blocking operation of sending the CAN message
-        await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)  # Non-blocking send using run_in_executor
+        await asyncio.to_thread(bus.send, msg)  # Send in a separate thread, non-blocking
         print(f"✅ Sent: CAN ID {hex(arbitration_id)} Data {[hex(b) for b in data]}")
         log_event("CAN_SEND", actuator_id=arbitration_id, command=command)
     except can.CanError as e:
         print(f"❌ CAN Error: {e}")
 
-def send_initial_can_commands(bus):
-    """Send SDO, NMT Start, and Clear Error commands."""
+async def send_initial_can_commands(bus):
+    """Send SDO, NMT Start, and Clear Error commands asynchronously."""
     print("📤 Sending SDO commands")
     sdo_commands = [
         (0x622, [0x23, 0x16, 0x10, 0x01, 0xC8, 0x00, 0x01, 0x00]),
@@ -70,7 +69,7 @@ def send_initial_can_commands(bus):
     ]
     for arb_id, data in sdo_commands:
         asyncio.create_task(send_message_async(bus, arb_id, data, "SDO_COMMAND"))
-        time.sleep(0.2)
+        await asyncio.sleep(0.2)
 
     print("📤 Sending NMT Start commands")
     nmt_commands = [
@@ -80,7 +79,7 @@ def send_initial_can_commands(bus):
     ]
     for arb_id, data in nmt_commands:
         asyncio.create_task(send_message_async(bus, arb_id, data, "NMT_START"))
-        time.sleep(0.2)
+        await asyncio.sleep(0.2)
 
     print("📤 Sending Clear Error commands")
     clear_error_commands = [
@@ -90,7 +89,7 @@ def send_initial_can_commands(bus):
     ]
     for arb_id, data in clear_error_commands:
         asyncio.create_task(send_message_async(bus, arb_id, data, "CLEAR_ERROR"))
-        time.sleep(0.2)
+        await asyncio.sleep(0.2)
 
     print("✅ Initial CAN setup completed.")
 
@@ -185,7 +184,7 @@ async def main(service_config_path: Path) -> None:
     bus = setup_can_bus()
 
     # Initial CAN setup (SDO, NMT, Clear Error)
-    send_initial_can_commands(bus)
+    await send_initial_can_commands(bus)
 
     # Listen for user input to engage actuators
     while True:
