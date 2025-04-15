@@ -14,6 +14,8 @@ from farm_ng.gps import gps_pb2
 # Global variables
 initial_x = None
 initial_y = None
+previous_time = None
+previous_position = None
 triggered_actuators = set()
 
 # CAN channel configuration
