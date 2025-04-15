@@ -24,14 +24,14 @@ CAN_CHANNEL = 'can0'
 # Prepare automatic timestamped CSV filename
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 csv_file = Path(__file__).parent / f"gps_can_log_{timestamp}.csv"
-csv_headers = ["timestamp", "event_type", "x", "y", "vx", "vy", "actuator_id", "command"]
+csv_headers = ["timestamp", "event_type", "x", "y", "vx", "vy", "sampling_time_sec", "actuator_id", "command"]
 
 # Initialize CSV file with headers
 with open(csv_file, mode='w', newline='') as file:
     writer = csv.writer(file)
     writer.writerow(csv_headers)
 
-def log_event(event_type, x=None, y=None, vx=None, vy=None, actuator_id=None, command=None):
+def log_event(event_type, x=None, y=None, vx=None, vy=None, sampling_time=None, actuator_id=None, command=None):
     """Log an event to the CSV file."""
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
@@ -41,6 +41,7 @@ def log_event(event_type, x=None, y=None, vx=None, vy=None, actuator_id=None, co
                          f"{y:.3f}" if y is not None else "",
                          f"{vx:.3f}" if vx is not None else "",
                          f"{vy:.3f}" if vy is not None else "",
+                         f"{sampling_time:.3f}" if sampling_time is not None else "",
                          actuator_id if actuator_id else "",
                          command if command else ""])
 
@@ -168,7 +169,7 @@ def print_relative_position_frame(msg, bus, previous_position=None, previous_tim
     )
 
     # Log GPS data and velocity to CSV
-    log_event("GPS_FRAME", x, y, vx, vy)
+    log_event("GPS_FRAME", x, y, vx, vy, sampling_time=previous_time)
 
     # Print for terminal
     print(f"X (North): {x}, Y (West): {y}")
