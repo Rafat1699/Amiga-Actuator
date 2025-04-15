@@ -49,11 +49,11 @@ def setup_can_bus():
     """Initialize CAN bus."""
     return can.interface.Bus(channel=CAN_CHANNEL, interface='socketcan')
 
-def send_message(bus, arbitration_id, data, command=""):
-    """Send CAN message and log it."""
+async def send_message_async(bus, arbitration_id, data, command=""):
+    """Asynchronously send CAN message and log it."""
     msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=False)
     try:
-        bus.send(msg)
+        await asyncio.to_thread(bus.send, msg)  # Non-blocking send using asyncio
         print(f"✅ Sent: CAN ID {hex(arbitration_id)} Data {[hex(b) for b in data]}")
         log_event("CAN_SEND", actuator_id=arbitration_id, command=command)
     except can.CanError as e:
@@ -68,7 +68,7 @@ def send_initial_can_commands(bus):
         (0x626, [0x23, 0x16, 0x10, 0x01, 0xC8, 0x00, 0x01, 0x00]),
     ]
     for arb_id, data in sdo_commands:
-        send_message(bus, arb_id, data, "SDO_COMMAND")
+        asyncio.create_task(send_message_async(bus, arb_id, data, "SDO_COMMAND"))
         time.sleep(0.2)
 
     print("📤 Sending NMT Start commands")
@@ -78,7 +78,7 @@ def send_initial_can_commands(bus):
         (0x000, [0x01, 0x26]),
     ]
     for arb_id, data in nmt_commands:
-        send_message(bus, arb_id, data, "NMT_START")
+        asyncio.create_task(send_message_async(bus, arb_id, data, "NMT_START"))
         time.sleep(0.2)
 
     print("📤 Sending Clear Error commands")
@@ -88,13 +88,13 @@ def send_initial_can_commands(bus):
         (0x226, [0x00, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]),
     ]
     for arb_id, data in clear_error_commands:
-        send_message(bus, arb_id, data, "CLEAR_ERROR")
+        asyncio.create_task(send_message_async(bus, arb_id, data, "CLEAR_ERROR"))
         time.sleep(0.2)
 
     print("✅ Initial CAN setup completed.")
 
-def send_actuator_command(bus, command_str):
-    """Send actuator command based on user input (e.g., 22-open or 24-close)."""
+async def send_actuator_command_async(bus, command_str):
+    """Send actuator command asynchronously (open/close)."""
     actuator_id = int(command_str.split('-')[0])  # Get actuator ID (22, 24, or 26)
     action = command_str.split('-')[1]  # Get action (open or close)
 
@@ -118,8 +118,8 @@ def send_actuator_command(bus, command_str):
         print(f"Invalid action for actuator {actuator_id}. Please use 'open' or 'close'.")
         return
 
-    # Send the message and log the event
-    send_message(bus, arb_id, data, action)
+    # Send the message asynchronously
+    await send_message_async(bus, arb_id, data, action)
 
 def extract_position_and_velocity(msg, previous_position=None, previous_time=None):
     """Extract position (X, Y) and velocity (VX, VY) from the GPS frame."""
@@ -191,7 +191,8 @@ async def main(service_config_path: Path) -> None:
         command_str = input("Enter actuator command (e.g., 22-open, 24-close) or 'exit' to quit: ")
         if command_str == 'exit':
             break
-        send_actuator_command(bus, command_str)
+        # Run actuator commands asynchronously in the background
+        asyncio.create_task(send_actuator_command_async(bus, command_str))
 
     async for event, msg in EventClient(config).subscribe(config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
