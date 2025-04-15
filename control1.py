@@ -122,9 +122,9 @@ def send_actuator_command(bus, command_str):
 
 def extract_position_and_velocity(msg, previous_position=None, previous_time=None):
     """Extract position (X, Y) and velocity (VX, VY) from the GPS frame."""
-    # Extract North (latitude), West (longitude)
-    x = msg.latitude  # X-axis (North)
-    y = msg.longitude  # Y-axis (West)
+    # Extract position data
+    x = msg.relative_pose_north  # X-axis (North)
+    y = msg.relative_pose_east   # Y-axis (West)
 
     # Initialize previous values if first GPS reading
     if previous_position is None or previous_time is None:
@@ -134,11 +134,11 @@ def extract_position_and_velocity(msg, previous_position=None, previous_time=Non
     time_diff = time.time() - previous_time
     distance = calculate_distance(x, y)  # distance in meters
 
-    # Compute velocity (VX, VY) based on change in position over time
-    velocity_x = (x - previous_position[0]) / time_diff if time_diff != 0 else 0.0  # North is X
-    velocity_y = (y - previous_position[1]) / time_diff if time_diff != 0 else 0.0  # West is Y
+    # Compute velocities (VX, VY) based on change in position over time
+    vx = (x - previous_position[0]) / time_diff if time_diff != 0 else 0.0  # Velocity in North (X)
+    vy = (y - previous_position[1]) / time_diff if time_diff != 0 else 0.0  # Velocity in West (Y)
 
-    return x, y, velocity_x, velocity_y, x, y, time.time()
+    return x, y, vx, vy, x, y, time.time()
 
 def calculate_distance(x, y):
     """Calculate the distance from the initial position."""
@@ -149,26 +149,30 @@ def calculate_distance(x, y):
 def print_relative_position_frame(msg, bus, previous_position=None, previous_time=None):
     global initial_x, initial_y
 
+    # Print current GPS data
     print("RELATIVE POSITION FRAME \n")
     print(f"X (North): {msg.relative_pose_north}")
     print(f"Y (West): {msg.relative_pose_east}")
 
-    # Set initial position
+    # Set initial position if it's the first frame
     if initial_x is None and initial_y is None:
         initial_x = msg.relative_pose_north
         initial_y = msg.relative_pose_east
         print(f"📍 Initial position set. X: {initial_x}, Y: {initial_y}")
-        log_event("INITIAL_POSITION", initial_x, initial_y, msg.relative_pose_down)
-        return
+        log_event("INITIAL_POSITION", initial_x, initial_y, 0, 0)
+        return  # No further processing until first frame is received
 
-    # Get new position and velocity
+    # Get current position and velocity
     x, y, vx, vy, previous_x, previous_y, previous_time = extract_position_and_velocity(
         msg, previous_position, previous_time
     )
 
-    # Log GPS frame
+    # Log GPS data and velocity to CSV
     log_event("GPS_FRAME", x, y, vx, vy)
 
+    # Print for terminal
+    print(f"X (North): {x}, Y (West): {y}")
+    print(f"VX: {vx}, VY: {vy}")
     print("-" * 50)
 
 async def main(service_config_path: Path) -> None:
