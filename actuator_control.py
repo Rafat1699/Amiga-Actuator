@@ -1,9 +1,9 @@
 import can
 import asyncio
 import csv
-from datetime import datetime
 from pathlib import Path
 import time
+from datetime import datetime
 
 # Global variables
 csv_file = Path(__file__).parent / "gps_can_log.csv"  # Same CSV file used by gps_stream.py
@@ -36,6 +36,40 @@ async def send_message_async(bus, arbitration_id, data, command=""):
     except can.CanError as e:
         print(f"❌ CAN Error: {e}")
 
+async def send_initial_can_commands(bus):
+    """Send SDO, NMT Start, and Clear Error commands asynchronously."""
+    print("📤 Sending SDO commands")
+    sdo_commands = [
+        (0x622, [0x23, 0x16, 0x10, 0x01, 0xC8, 0x00, 0x01, 0x00]),
+        (0x624, [0x23, 0x16, 0x10, 0x01, 0xC8, 0x00, 0x01, 0x00]),
+        (0x626, [0x23, 0x16, 0x10, 0x01, 0xC8, 0x00, 0x01, 0x00]),
+    ]
+    for arb_id, data in sdo_commands:
+        await send_message_async(bus, arb_id, data, "SDO_COMMAND")
+        await asyncio.sleep(0.2)
+
+    print("📤 Sending NMT Start commands")
+    nmt_commands = [
+        (0x000, [0x01, 0x22]),
+        (0x000, [0x01, 0x24]),
+        (0x000, [0x01, 0x26]),
+    ]
+    for arb_id, data in nmt_commands:
+        await send_message_async(bus, arb_id, data, "NMT_START")
+        await asyncio.sleep(0.2)
+
+    print("📤 Sending Clear Error commands")
+    clear_error_commands = [
+        (0x222, [0x00, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]),
+        (0x224, [0x00, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]),
+        (0x226, [0x00, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]),
+    ]
+    for arb_id, data in clear_error_commands:
+        await send_message_async(bus, arb_id, data, "CLEAR_ERROR")
+        await asyncio.sleep(0.2)
+
+    print("✅ Initial CAN setup completed.")
+
 async def send_actuator_command_async(bus, command_str):
     """Send actuator command asynchronously (open/close)."""
     actuator_id = int(command_str.split('-')[0])  # Get actuator ID (22, 24, or 26)
@@ -67,6 +101,9 @@ async def send_actuator_command_async(bus, command_str):
 async def main():
     """Run the actuator control loop."""
     bus = setup_can_bus()
+
+    # Send the initial setup commands (SDO, NMT, Clear Error)
+    await send_initial_can_commands(bus)
 
     # Listen for actuator commands and send them
     while True:
