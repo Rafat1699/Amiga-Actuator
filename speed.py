@@ -65,10 +65,10 @@ async def send_message_async(bus, arb_id, data, command=""):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     try:
         await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)
-        print(f"\u2705 Sent: CAN ID {hex(arb_id)} Data {[hex(b) for b in data]}")
+        print(f"Sent: CAN ID {hex(arb_id)} Data {[hex(b) for b in data]}")
         log_event("CAN_SEND", actuator_id=arb_id, command=command)
     except can.CanError as e:
-        print(f"\u274C CAN Error: {e}")
+        print(f"CAN Error: {e}")
 
 async def read_sdo_feedback(bus, node_id):
     read_position = [0x40, 0x01, 0x20, 0x00, 0, 0, 0, 0]
@@ -91,7 +91,7 @@ async def read_sdo_feedback(bus, node_id):
 
     pos_mm = pos * 0.1
     spd_mms = spd * 0.1
-    print(f"\ud83d\udce1 Actuator {node_id} Feedback → Position: {pos_mm:.1f} mm | Speed: {spd_mms:.1f} mm/s")
+    print(f"Actuator {node_id} Feedback -> Position: {pos_mm:.1f} mm | Speed: {spd_mms:.1f} mm/s")
     return pos_mm, spd_mms
 
 async def send_actuator_command_with_feedback(bus, actuator_id, action):
@@ -130,7 +130,7 @@ async def listen_actuator_pdo(bus):
         if msg.arbitration_id == 0x1A2:
             data = msg.data
             pos_mm = int.from_bytes(data[1:3], byteorder='little') * 0.1
-            print(f"\ud83d\udce2 PDO Feedback: Position ≈ {pos_mm:.1f} mm | Raw: {[hex(b) for b in data]}")
+            print(f"PDO Feedback: Position ~ {pos_mm:.1f} mm | Raw: {[hex(b) for b in data]}")
             log_event("PDO_FEEDBACK", actuator_id="22", position=pos_mm)
 
 def print_gps_frame(msg):
