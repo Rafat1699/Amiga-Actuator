@@ -168,6 +168,27 @@ async def send_actuator_command_async(bus, actuator_id):
     await asyncio.sleep(20)  # Wait for 20 seconds
     print(f"Actuator {arb_id} {action} completed.")
 
+async def handle_actuator_commands(bus):
+    """Handle actuator commands (open/close) interactively."""
+    while True:
+        command = input("Enter actuator command (e.g., 22-open, 22-close) or 'exit' to quit: ").strip()
+        if command.lower() == 'exit':
+            break
+        elif command == "22-open":
+            await send_actuator_command_async(bus, 22)
+        elif command == "22-close":
+            await send_actuator_command_async(bus, 22)
+        elif command == "24-open":
+            await send_actuator_command_async(bus, 24)
+        elif command == "24-close":
+            await send_actuator_command_async(bus, 24)
+        elif command == "26-open":
+            await send_actuator_command_async(bus, 26)
+        elif command == "26-close":
+            await send_actuator_command_async(bus, 26)
+        else:
+            print("Invalid command. Please try again.")
+
 async def main(gps_config_path):
     """Run the GPS service client and actuator control loop."""
     # Setup CAN bus for actuator control
@@ -176,15 +197,14 @@ async def main(gps_config_path):
     # Send the initial setup commands (SDO, NMT, Clear Error)
     await send_initial_can_commands(bus)
 
-    # Start actuator control: Open actuator 22, wait for 20 seconds, then close it
-    await send_actuator_command_async(bus, 22)  # Open actuator 22
-    await send_actuator_command_async(bus, 22)  # Close actuator 22 after 20 seconds
-
     # Start GPS data streaming and logging
     gps_config = proto_from_json_file(gps_config_path, EventServiceConfig())  # Load service_config.json for GPS
     async for event, msg in EventClient(gps_config).subscribe(gps_config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
             print_relative_position_frame(msg)
+
+    # Handle actuator commands
+    await handle_actuator_commands(bus)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python gps_actuator_control.py", description="GPS + Actuator control + CSV logging.")
