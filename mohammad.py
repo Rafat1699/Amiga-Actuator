@@ -185,7 +185,7 @@ async def main(gps_config_path):
     await asyncio.sleep(20)
     await send_actuator_command_async(bus, 22, 'open')  # Open actuator 22
     await asyncio.sleep(10)
-    await send_actuator_command_async(bus, 22, 'close')  # Close actuator 22 after 30 seconds
+    await send_actuator_command_async(bus, 22, 'close')  # Close actuator 22 after 30 seconds (10 more seconds)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python gps_actuator_control.py", description="GPS + Actuator control + CSV logging.")
