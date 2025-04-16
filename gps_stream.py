@@ -2,10 +2,12 @@ import can
 import time
 import math
 import asyncio
+import argparse
 import csv
 from pathlib import Path
 from datetime import datetime
 from farm_ng.core.event_client import EventClient
+from farm_ng.core.event_service_pb2 import EventServiceConfig  # Import EventServiceConfig
 from farm_ng.core.events_file_reader import proto_from_json_file
 from farm_ng.gps import gps_pb2
 
