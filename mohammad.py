@@ -5,9 +5,10 @@ import asyncio
 import csv
 from pathlib import Path
 from datetime import datetime
+import argparse
 from farm_ng.core.event_client import EventClient
 from farm_ng.core.events_file_reader import proto_from_json_file
-from farm_ng.core.event_service_pb2 import EventServiceConfig  # Import EventServiceConfig
+from farm_ng.core.event_service_pb2 import EventServiceConfig
 from farm_ng.gps import gps_pb2
 
 # Global variables
@@ -30,9 +31,6 @@ with open(csv_file, mode='w', newline='') as file:
 
 # Track the start time of the program
 start_time = time.time()  # Record the start time (in seconds)
-
-# Event to signal actuator commands processing
-actuator_event = asyncio.Event()
 
 def log_event(event_type, x=None, y=None, vx=None, vy=None, sampling_time=None, actuator_id=None, command=None):
     """Log an event to the CSV file."""
@@ -79,35 +77,6 @@ def calculate_distance(x, y):
     delta_x = x - initial_x
     delta_y = y - initial_y
     return math.sqrt(delta_x ** 2 + delta_y ** 2)
-
-def print_relative_position_frame(msg, previous_position=None, previous_time=None):
-    global initial_x, initial_y
-
-    # Print current GPS data
-    print("RELATIVE POSITION FRAME \n")
-    print(f"X (North): {msg.relative_pose_north}")
-    print(f"Y (West): {msg.relative_pose_east}")
-
-    # Set initial position if it's the first frame
-    if initial_x is None and initial_y is None:
-        initial_x = msg.relative_pose_north
-        initial_y = msg.relative_pose_east
-        print(f"📍 Initial position set. X: {initial_x}, Y: {initial_y}")
-        log_event("INITIAL_POSITION", initial_x, initial_y, 0, 0)
-        return  # No further processing until first frame is received
-
-    # Get current position and velocity
-    x, y, vx, vy, previous_x, previous_y, previous_time = extract_position_and_velocity(
-        msg, previous_position, previous_time
-    )
-
-    # Log GPS data and velocity to CSV
-    log_event("GPS_FRAME", x, y, vx, vy, sampling_time=previous_time)
-
-    # Print for terminal
-    print(f"X (North): {x}, Y (West): {y}")
-    print(f"VX: {vx}, VY: {vy}")
-    print("-" * 50)
 
 async def send_message_async(bus, arbitration_id, data, command=""):
     """Asynchronously send CAN message and log it."""
@@ -169,7 +138,7 @@ async def send_actuator_command_async(bus, actuator_id):
     await asyncio.sleep(20)  # Wait for 20 seconds
     print(f"Actuator {arb_id} {action} completed.")
 
-async def main(service_config_path: Path):
+async def main(gps_config_path, actuator_config_path):
     """Run the GPS service client and actuator control loop."""
     # Setup CAN bus for actuator control
     bus = setup_can_bus()
@@ -182,14 +151,15 @@ async def main(service_config_path: Path):
     await send_actuator_command_async(bus, 22)  # Close actuator 22 after 20 seconds
 
     # Start GPS data streaming and logging
-    config = proto_from_json_file(service_config_path, EventServiceConfig())
-    async for event, msg in EventClient(config).subscribe(config.subscriptions[0]):
+    gps_config = proto_from_json_file(gps_config_path, EventServiceConfig())  # Load service_config.json for GPS
+    async for event, msg in EventClient(gps_config).subscribe(gps_config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
             print_relative_position_frame(msg)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python gps_actuator_control.py", description="GPS + Actuator control + CSV logging.")
-    parser.add_argument("--service-config", type=Path, required=True, help="The GPS config.")
+    parser.add_argument("--gps-service-config", type=Path, required=True, help="The GPS service config (service_config.json).")
+    parser.add_argument("--actuator-service-config", type=Path, required=True, help="The actuator service config (actuator_config.json).")
     args = parser.parse_args()
 
-    asyncio.run(main(args.service_config))
+    asyncio.run(main(args.gps_service_config, args.actuator_service_config))
