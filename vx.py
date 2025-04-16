@@ -4,30 +4,23 @@ import math
 import asyncio
 import csv
 from pathlib import Path
-from datetime import datetime
 import argparse
 from farm_ng.core.event_client import EventClient
 from farm_ng.core.events_file_reader import proto_from_json_file
 from farm_ng.core.event_service_pb2 import EventServiceConfig
 from farm_ng.gps import gps_pb2
 
-# Global for reference position
+# Globals
 initial_x = None
 initial_y = None
-previous_time = None
-previous_position = None
 
-# CAN config
 CAN_CHANNEL = 'can0'
-
-# CSV logging
 csv_file = Path(__file__).parent / "gps_can_log.csv"
 csv_headers = ["time_sec", "event_type", "x", "y", "vx", "vy", "sampling_time_sec", "actuator_id", "command"]
 
 with open(csv_file, mode='w', newline='') as f:
     csv.writer(f).writerow(csv_headers)
 
-# Program start time
 start_time = time.time()
 
 def log_event(event_type, x=None, y=None, vx=None, vy=None, sampling_time=None, actuator_id=None, command=None):
@@ -36,11 +29,11 @@ def log_event(event_type, x=None, y=None, vx=None, vy=None, sampling_time=None, 
         csv.writer(f).writerow([
             f"{elapsed:.3f}",
             event_type,
-            f"{x:.3f}" if x else "",
-            f"{y:.3f}" if y else "",
-            f"{vx:.3f}" if vx else "",
-            f"{vy:.3f}" if vy else "",
-            f"{sampling_time:.3f}" if sampling_time else "",
+            f"{x:.3f}" if x is not None else "",
+            f"{y:.3f}" if y is not None else "",
+            f"{vx:.3f}" if vx is not None else "",
+            f"{vy:.3f}" if vy is not None else "",
+            f"{sampling_time:.3f}" if sampling_time is not None else "",
             actuator_id if actuator_id else "",
             command if command else ""
         ])
@@ -85,33 +78,32 @@ async def send_actuator_command_async(bus, actuator_id, action):
     print(f"🛠️ Actuator {actuator_id} {action.upper()} sent")
     log_event("ACTUATOR", actuator_id=actuator_id, command=action)
 
-def print_pvt_frame(msg):
-    vx = msg.vel_north  # North = vx
-    vy = msg.vel_east   # East = vy
-    print(f"PVT FRAME\nvelNorth (vx): {vx:.3f}, velEast (vy): {vy:.3f}")
-    log_event("PVT_FRAME", vx=vx, vy=vy, sampling_time=time.time())
+def print_gps_frame(msg):
+    # Log vel_north (vx), vel_east (vy)
+    vx = msg.vel_north
+    vy = msg.vel_east
+    print(f"GPS FRAME: velNorth (vx): {vx:.3f}, velEast (vy): {vy:.3f}")
+    log_event("GPS_FRAME", vx=vx, vy=vy, sampling_time=time.time())
 
 def print_relative_position_frame(msg):
     global initial_x, initial_y
     x = msg.relative_pose_north
     y = msg.relative_pose_east
-
     if initial_x is None or initial_y is None:
         initial_x, initial_y = x, y
         print(f"📍 Initial pos X={x:.3f}, Y={y:.3f}")
         log_event("INITIAL_POSITION", x=x, y=y)
         return
-
     print(f"REL FRAME: X={x:.3f} Y={y:.3f}")
-    log_event("GPS_FRAME", x=x, y=y, sampling_time=time.time())
+    log_event("RELATIVE_FRAME", x=x, y=y, sampling_time=time.time())
 
 async def gps_streaming_task(gps_config_path):
     config = proto_from_json_file(gps_config_path, EventServiceConfig())
     async for event, msg in EventClient(config).subscribe(config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
             print_relative_position_frame(msg)
-        elif isinstance(msg, gps_pb2.PvtFrame):
-            print_pvt_frame(msg)
+        elif isinstance(msg, gps_pb2.GpsFrame):  # <== Use GpsFrame for vel_north, vel_east
+            print_gps_frame(msg)
 
 async def actuator_task(bus):
     await asyncio.sleep(20)
