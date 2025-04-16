@@ -19,28 +19,43 @@ CAN_CHANNEL = 'can0'
 # CSV File
 csv_file = Path(__file__).parent / "gps_can_log.csv"
 csv_headers = [
-    "time_sec", "event_type", "x", "y", "vx", "vy", "sampling_time_sec",
-    "actuator_id", "command", "actuator_position_mm", "actuator_speed_mms"
+    "time_sec", "x", "y", "vx", "vy", "sampling_time_sec",
+    "actuator_id", "command", "actuator_position_mm", "actuator_speed_mms", "event_type"
 ]
 with open(csv_file, mode='w', newline='') as f:
     csv.writer(f).writerow(csv_headers)
 
+latest_data = {
+    "x": "", "y": "", "vx": "", "vy": "",
+    "sampling_time_sec": "", "actuator_id": "",
+    "command": "", "actuator_position_mm": "", "actuator_speed_mms": "", "event_type": ""
+}
+
 def log_event(event_type, x=None, y=None, vx=None, vy=None, sampling_time=None,
               actuator_id=None, command=None, position=None, speed=None):
     elapsed = time.time() - start_time
+
+    if x is not None: latest_data["x"] = f"{x:.3f}"
+    if y is not None: latest_data["y"] = f"{y:.3f}"
+    if vx is not None: latest_data["vx"] = f"{vx:.3f}"
+    if vy is not None: latest_data["vy"] = f"{vy:.3f}"
+    if sampling_time is not None: latest_data["sampling_time_sec"] = f"{sampling_time:.3f}"
+    if actuator_id is not None: latest_data["actuator_id"] = actuator_id
+    if command is not None: latest_data["command"] = command
+    if position is not None: latest_data["actuator_position_mm"] = f"{position:.1f}"
+    if speed is not None: latest_data["actuator_speed_mms"] = f"{speed:.1f}"
+    latest_data["event_type"] = event_type
+
     with open(csv_file, mode='a', newline='') as f:
-        csv.writer(f).writerow([
+        writer = csv.writer(f)
+        writer.writerow([
             f"{elapsed:.3f}",
-            event_type,
-            f"{x:.3f}" if x else "",
-            f"{y:.3f}" if y else "",
-            f"{vx:.3f}" if vx else "",
-            f"{vy:.3f}" if vy else "",
-            f"{sampling_time:.3f}" if sampling_time else "",
-            actuator_id if actuator_id else "",
-            command if command else "",
-            f"{position:.1f}" if position else "",
-            f"{speed:.1f}" if speed else ""
+            latest_data["x"], latest_data["y"],
+            latest_data["vx"], latest_data["vy"],
+            latest_data["sampling_time_sec"],
+            latest_data["actuator_id"], latest_data["command"],
+            latest_data["actuator_position_mm"], latest_data["actuator_speed_mms"],
+            latest_data["event_type"]
         ])
 
 def setup_can_bus():
@@ -50,10 +65,10 @@ async def send_message_async(bus, arb_id, data, command=""):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     try:
         await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)
-        print(f"✅ Sent: CAN ID {hex(arb_id)} Data {[hex(b) for b in data]}")
+        print(f"\u2705 Sent: CAN ID {hex(arb_id)} Data {[hex(b) for b in data]}")
         log_event("CAN_SEND", actuator_id=arb_id, command=command)
     except can.CanError as e:
-        print(f"❌ CAN Error: {e}")
+        print(f"\u274C CAN Error: {e}")
 
 async def read_sdo_feedback(bus, node_id):
     read_position = [0x40, 0x01, 0x20, 0x00, 0, 0, 0, 0]
@@ -68,7 +83,7 @@ async def read_sdo_feedback(bus, node_id):
         await send_message_async(bus, request_id, data, "SDO_READ")
         while True:
             msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
-            if msg.arbitration_id == response_id and msg.data[0] == 0x43:
+            if msg.arbitration_id == response_id and msg.data[0] & 0x40 == 0x40:
                 return parse_response(msg.data)
 
     pos = await request_and_wait(read_position)
@@ -76,16 +91,20 @@ async def read_sdo_feedback(bus, node_id):
 
     pos_mm = pos * 0.1
     spd_mms = spd * 0.1
-    print(f"📥 Actuator {node_id} Feedback → Position: {pos_mm:.1f} mm | Speed: {spd_mms:.1f} mm/s")
+    print(f"\ud83d\udce1 Actuator {node_id} Feedback → Position: {pos_mm:.1f} mm | Speed: {spd_mms:.1f} mm/s")
     return pos_mm, spd_mms
 
 async def send_actuator_command_with_feedback(bus, actuator_id, action):
     arb_id = {22: 0x222, 24: 0x224, 26: 0x226}.get(actuator_id)
-    if arb_id is None:
-        print("Invalid actuator")
+    if not arb_id:
+        print("Invalid actuator ID.")
         return
-    data = [0xE8, 0x03, 0xFB, 0xFB, 0xFB, 0xFB, 0, 0] if action == 'open' else [0x02, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0, 0]
-    await send_message_async(bus, arb_id, data, action)
+
+    run_cmd = [0xE8, 0x03, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00] if action == 'open' else \
+              [0x01, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # correct RUN IN value
+    await send_message_async(bus, arb_id, run_cmd, action)
+    await asyncio.sleep(0.5)
+
     pos, spd = await read_sdo_feedback(bus, actuator_id)
     log_event("ACTUATOR_FEEDBACK", actuator_id=actuator_id, command=action, position=pos, speed=spd)
 
@@ -104,6 +123,15 @@ async def send_initial_can_commands(bus):
     for cmd in sdo + nmt + clr:
         await send_message_async(bus, *cmd)
         await asyncio.sleep(0.2)
+
+async def listen_actuator_pdo(bus):
+    while True:
+        msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
+        if msg.arbitration_id == 0x1A2:
+            data = msg.data
+            pos_mm = int.from_bytes(data[1:3], byteorder='little') * 0.1
+            print(f"\ud83d\udce2 PDO Feedback: Position ≈ {pos_mm:.1f} mm | Raw: {[hex(b) for b in data]}")
+            log_event("PDO_FEEDBACK", actuator_id="22", position=pos_mm)
 
 def print_gps_frame(msg):
     vx = msg.vel_north
@@ -140,7 +168,8 @@ async def main(gps_config_path):
     await send_initial_can_commands(bus)
     gps_task = asyncio.create_task(gps_streaming_task(gps_config_path))
     act_task = asyncio.create_task(actuator_task(bus))
-    await asyncio.gather(gps_task, act_task)
+    pdo_task = asyncio.create_task(listen_actuator_pdo(bus))
+    await asyncio.gather(gps_task, act_task, pdo_task)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
