@@ -100,8 +100,14 @@ async def send_actuator_command_with_feedback(bus, actuator_id, action):
         print("Invalid actuator ID.")
         return
 
-    run_cmd = [0xE8, 0x03, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00] if action == 'open' else \
-              [0x01, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # correct RUN IN value
+    if action == 'open':
+        run_cmd = [0xE8, 0x03, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # Run Out
+    elif action == 'close':
+        run_cmd = [0x02, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # Run In
+    else:
+        print("Invalid action.")
+        return
+
     await send_message_async(bus, arb_id, run_cmd, action)
     await asyncio.sleep(0.5)
 
