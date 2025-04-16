@@ -166,7 +166,6 @@ async def send_actuator_command_async(bus, actuator_id, command_type):
     # Send the message asynchronously
     await send_message_async(bus, arb_id, data, action)
     print(f"Actuator {arb_id} {action} completed.")
-    await asyncio.sleep(10)  # Wait for 10 seconds
 
 async def main(gps_config_path):
     """Run the GPS service client and actuator control loop."""
@@ -182,11 +181,11 @@ async def main(gps_config_path):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
             print_relative_position_frame(msg)
 
-    # Wait 20 seconds and then send the actuator open command
+    # Wait for 20 seconds and then send the actuator open command
     await asyncio.sleep(20)
     await send_actuator_command_async(bus, 22, 'open')  # Open actuator 22
     await asyncio.sleep(10)
-    await send_actuator_command_async(bus, 22, 'close')  # Close actuator 22 after 10 seconds
+    await send_actuator_command_async(bus, 22, 'close')  # Close actuator 22 after 30 seconds
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python gps_actuator_control.py", description="GPS + Actuator control + CSV logging.")
