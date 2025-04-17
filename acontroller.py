@@ -50,7 +50,7 @@ start_time = time.time()
 def log_event(**kwargs):
     """Update latest with any kwargs, then write a full row."""
     now = time.time()
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
         latest[k] = f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
     row = {"time_sec": f"{now - start_time:.3f}"}
     row.update(latest)
@@ -76,15 +76,18 @@ async def send_message_async(bus, arb_id, data, command=None):
 
 async def send_initial_can_commands(bus):
     cmds = []
+    # SDO configurations
     for node in ACTUATOR_IDS:
         cmds.append((0x600 + node, [0x23,0x16,0x10,0x01,0xC8,0x00,0x01,0x00]))
+    # NMT start nodes
     for node in ACTUATOR_IDS:
         cmds.append((0x000, [0x01, node]))
+    # Clear errors
     for node in ACTUATOR_IDS:
         cmds.append((0x200 + node, [0x00,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]))
 
     print("📤 Initializing actuators...")
-    for arb_id,data in cmds:
+    for arb_id, data in cmds:
         await send_message_async(bus, arb_id, data, command="INIT")
         await asyncio.sleep(0.1)
     print("✅ Initialization complete.")
@@ -94,7 +97,8 @@ async def send_actuator_command(bus, actuator_id, action):
     arb_id = arb_id_map.get(actuator_id)
     if not arb_id:
         return
-    data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00] if action=="open" else [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
+    data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00] if action=="open" \
+           else [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
     await send_message_async(bus, arb_id, data, command=action)
 
 # ───────────────────────────────────────────────────────
@@ -102,7 +106,7 @@ async def send_actuator_command(bus, actuator_id, action):
 # ───────────────────────────────────────────────────────
 def load_signal_data():
     global heading_array, S, c
-    data = np.loadtxt(Path(__file__).parent/"signals2.txt")
+    data = np.loadtxt(Path(__file__).parent / "signals2.txt")
     heading_array = data[0, :]
     S = data[1:, :]
     z = S.shape[0] // len(ACTUATOR_IDS)
@@ -114,6 +118,7 @@ def load_signal_data():
 async def controller(bus, a, b, vx, _unused):
     global index, ds1, ds2, ds3, xx, i
 
+    # 1) First call: load signals, pick segment, init ds arrays, send initial commands
     if index is None:
         load_signal_data()
         index = int(np.argmin(np.abs(c - b)))
@@ -133,27 +138,32 @@ async def controller(bus, a, b, vx, _unused):
         if s2[0] == 1: await send_actuator_command(bus, 24, "open")
         if s3[0] == 1: await send_actuator_command(bus, 26, "open")
 
+    # 2) If all steps done, exit
     if i >= len(xx):
         return
 
     w = xx[i]
     lookahead = a - d + T * vx
 
+    # actuator 22
     if lookahead > w and ds1[i] == 1:
         await send_actuator_command(bus, 22, "open");  i += 1
     elif lookahead < w and ds1[i] == -1:
         await send_actuator_command(bus, 22, "close"); i += 1
 
+    # actuator 24
     if lookahead > w and ds2[i] == 1:
         await send_actuator_command(bus, 24, "open");  i += 1
     elif lookahead < w and ds2[i] == -1:
         await send_actuator_command(bus, 24, "close"); i += 1
 
+    # actuator 26
     if lookahead > w and ds3[i] == 1:
         await send_actuator_command(bus, 26, "open");  i += 1
     elif lookahead < w and ds3[i] == -1:
         await send_actuator_command(bus, 26, "close"); i += 1
 
+    # Final shutdown once heading > last threshold
     if a > xx[-1]:
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
