@@ -23,7 +23,7 @@ L = 30.48   # field length (m)
 d = 0.9     # look‑back distance (rad)
 T = 5       # time horizon (s)
 
-# Controller state
+# Controller state (populated on first controller call)
 index = None
 ds1 = ds2 = ds3 = None
 xx = None
@@ -32,6 +32,10 @@ i = 0
 heading_array = None
 S = None
 c = None
+
+# GPS state
+initial_x = None
+initial_y = None
 
 # ───────────────────────────────────────────────────────
 # CSV Logging Setup
@@ -74,10 +78,13 @@ async def send_message_async(bus, arb_id, data, command=None):
 
 async def send_initial_can_commands(bus):
     cmds = []
+    # SDO setup
     for node in ACTUATOR_IDS:
         cmds.append((0x600 + node, [0x23,0x16,0x10,0x01,0xC8,0x00,0x01,0x00]))
+    # NMT start
     for node in ACTUATOR_IDS:
         cmds.append((0x000, [0x01, node]))
+    # Clear errors
     for node in ACTUATOR_IDS:
         cmds.append((0x200 + node, [0x00,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]))
 
@@ -92,7 +99,7 @@ async def send_actuator_command(bus, actuator_id, action):
     arb_id = arb_id_map.get(actuator_id)
     if arb_id is None:
         return
-    # use if/elif for open/close
+    # if / elif for open vs close
     if action == "open":
         data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
     elif action == "close":
@@ -107,7 +114,6 @@ async def send_actuator_command(bus, actuator_id, action):
 def load_signal_data():
     global heading_array, S, c
     path = Path(__file__).parent / "signals2.txt"
-    # explicitly tell NumPy to split on commas
     data = np.loadtxt(path, delimiter=',')
     heading_array = data[0, :]
     S = data[1:, :]
@@ -129,12 +135,12 @@ async def controller(bus, a, b, vx, _unused):
         ds1 = np.insert(np.diff(s1), 0, s1[0])
         ds2 = np.insert(np.diff(s2), 0, s2[0])
         ds3 = np.insert(np.diff(s3), 0, s3[0])
-        xx = heading_array.copy() if (index+1)%2==1 else (L - heading_array)
+        xx = heading_array.copy() if (index + 1) % 2 == 1 else (L - heading_array)
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
-        if s1[0]==1: await send_actuator_command(bus, 22, "open")
-        if s2[0]==1: await send_actuator_command(bus, 24, "open")
-        if s3[0]==1: await send_actuator_command(bus, 26, "open")
+        if s1[0] == 1: await send_actuator_command(bus, 22, "open")
+        if s2[0] == 1: await send_actuator_command(bus, 24, "open")
+        if s3[0] == 1: await send_actuator_command(bus, 26, "open")
 
     if i >= len(xx):
         return
@@ -164,9 +170,8 @@ async def controller(bus, a, b, vx, _unused):
 # ───────────────────────────────────────────────────────
 # GPS Streaming Task
 # ───────────────────────────────────────────────────────
-initial_x = initial_y = None
-
 async def gps_streaming_task(gps_config_path, bus):
+    global initial_x, initial_y
     config: EventServiceConfig = proto_from_json_file(gps_config_path, EventServiceConfig())
     async for _, msg in EventClient(config).subscribe(config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
@@ -176,13 +181,15 @@ async def gps_streaming_task(gps_config_path, bus):
                 initial_x, initial_y = x, y
                 log_event(x=0.0, y=0.0)
             else:
-                log_event(x=x-initial_x, y=y-initial_y)
+                log_event(x=x - initial_x, y=y - initial_y)
             continue
 
         if isinstance(msg, gps_pb2.GpsFrame):
-            vx, vy = msg.vel_north, msg.vel_east
+            vx = msg.vel_north
+            vy = msg.vel_east
             log_event(vx=vx, vy=vy)
 
+        # safe float conversion with default
         b      = float(latest["y"] or 0.0)
         vx_now = float(latest["vx"] or 0.0)
         vy_now = float(latest["vy"] or 0.0)
@@ -200,8 +207,8 @@ async def listen_actuator_pdo(bus):
         msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
         aid = ID_TO_AID.get(msg.arbitration_id)
         if aid:
-            pos_mm = int.from_bytes(msg.data[0:2],"little")*0.1
-            spd_mms = int.from_bytes(msg.data[5:7],"little")*0.1
+            pos_mm = int.from_bytes(msg.data[0:2], "little") * 0.1
+            spd_mms = int.from_bytes(msg.data[5:7], "little") * 0.1
             log_event(**{
                 f"pdo_position_mm_{aid}": pos_mm,
                 f"pdo_speed_mms_{aid}": spd_mms
@@ -212,7 +219,7 @@ async def listen_actuator_pdo(bus):
 # ───────────────────────────────────────────────────────
 async def main(gps_config_path):
     if not csv_file.exists():
-        with open(csv_file,"w",newline="") as f:
+        with open(csv_file, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=csv_headers)
             writer.writeheader()
 
