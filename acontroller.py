@@ -19,12 +19,10 @@ from farm_ng.gps import gps_pb2
 CAN_CHANNEL = 'can0'
 ACTUATOR_IDS = [22, 24, 26]
 
-# controller geometry/time constants
 L = 30.48   # field length (m)
-d = 0.9     # look‑back distance (rad)
+d = 0.9     # look‑back distance
 T = 5       # time horizon (s)
 
-# signal/state arrays (populated on first controller call)
 index = None
 ds1 = ds2 = ds3 = None
 xx = None
@@ -48,7 +46,6 @@ latest = {h: "" for h in csv_headers if h != "time_sec"}
 start_time = time.time()
 
 def log_event(**kwargs):
-    """Update latest with any kwargs, then write a full row."""
     now = time.time()
     for k, v in kwargs.items():
         latest[k] = f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
@@ -76,13 +73,10 @@ async def send_message_async(bus, arb_id, data, command=None):
 
 async def send_initial_can_commands(bus):
     cmds = []
-    # SDO configurations
     for node in ACTUATOR_IDS:
         cmds.append((0x600 + node, [0x23,0x16,0x10,0x01,0xC8,0x00,0x01,0x00]))
-    # NMT start nodes
     for node in ACTUATOR_IDS:
         cmds.append((0x000, [0x01, node]))
-    # Clear errors
     for node in ACTUATOR_IDS:
         cmds.append((0x200 + node, [0x00,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]))
 
@@ -95,14 +89,21 @@ async def send_initial_can_commands(bus):
 async def send_actuator_command(bus, actuator_id, action):
     arb_id_map = {22:0x222, 24:0x224, 26:0x226}
     arb_id = arb_id_map.get(actuator_id)
-    if not arb_id:
+    if arb_id is None:
         return
-    data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00] if action=="open" \
-           else [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
+
+    # use if / elif for open / close
+    if action == "open":
+        data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
+    elif action == "close":
+        data = [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
+    else:
+        return
+
     await send_message_async(bus, arb_id, data, command=action)
 
 # ───────────────────────────────────────────────────────
-# Signal Data Loader (now from signals2.txt)
+# Signal Data Loader (signals2.txt)
 # ───────────────────────────────────────────────────────
 def load_signal_data():
     global heading_array, S, c
@@ -118,7 +119,6 @@ def load_signal_data():
 async def controller(bus, a, b, vx, _unused):
     global index, ds1, ds2, ds3, xx, i
 
-    # 1) First call: load signals, pick segment, init ds arrays, send initial commands
     if index is None:
         load_signal_data()
         index = int(np.argmin(np.abs(c - b)))
@@ -128,42 +128,34 @@ async def controller(bus, a, b, vx, _unused):
         ds1 = np.insert(np.diff(s1), 0, s1[0])
         ds2 = np.insert(np.diff(s2), 0, s2[0])
         ds3 = np.insert(np.diff(s3), 0, s3[0])
-        if (index + 1) % 2 == 1:
-            xx = heading_array.copy()
-        else:
-            xx = L - heading_array
+        xx = heading_array.copy() if (index + 1) % 2 == 1 else (L - heading_array)
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
         if s1[0] == 1: await send_actuator_command(bus, 22, "open")
         if s2[0] == 1: await send_actuator_command(bus, 24, "open")
         if s3[0] == 1: await send_actuator_command(bus, 26, "open")
 
-    # 2) If all steps done, exit
     if i >= len(xx):
         return
 
     w = xx[i]
     lookahead = a - d + T * vx
 
-    # actuator 22
     if lookahead > w and ds1[i] == 1:
         await send_actuator_command(bus, 22, "open");  i += 1
     elif lookahead < w and ds1[i] == -1:
         await send_actuator_command(bus, 22, "close"); i += 1
 
-    # actuator 24
     if lookahead > w and ds2[i] == 1:
         await send_actuator_command(bus, 24, "open");  i += 1
     elif lookahead < w and ds2[i] == -1:
         await send_actuator_command(bus, 24, "close"); i += 1
 
-    # actuator 26
     if lookahead > w and ds3[i] == 1:
         await send_actuator_command(bus, 26, "open");  i += 1
     elif lookahead < w and ds3[i] == -1:
         await send_actuator_command(bus, 26, "close"); i += 1
 
-    # Final shutdown once heading > last threshold
     if a > xx[-1]:
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
@@ -174,7 +166,6 @@ async def controller(bus, a, b, vx, _unused):
 initial_x = initial_y = None
 
 async def gps_streaming_task(gps_config_path, bus):
-    global initial_x, initial_y
     config: EventServiceConfig = proto_from_json_file(gps_config_path, EventServiceConfig())
     async for _, msg in EventClient(config).subscribe(config.subscriptions[0]):
         if isinstance(msg, gps_pb2.RelativePositionFrame):
@@ -192,9 +183,11 @@ async def gps_streaming_task(gps_config_path, bus):
             vy = msg.vel_east
             log_event(vx=vx, vy=vy)
 
-        b = float(latest["y"])
-        vx_now = float(latest["vx"])
-        a = math.atan2(vx_now, float(latest["vy"]))
+        b      = float(latest["y"] or 0.0)
+        vx_now = float(latest["vx"] or 0.0)
+        vy_now = float(latest["vy"] or 0.0)
+        a = math.atan2(vx_now, vy_now)
+
         await controller(bus, a, b, vx_now, None)
 
 # ───────────────────────────────────────────────────────
