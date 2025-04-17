@@ -20,9 +20,10 @@ CAN_CHANNEL = 'can0'
 ACTUATOR_IDS = [22, 24, 26]
 
 L = 30.48   # field length (m)
-d = 0.9     # look‑back distance
+d = 0.9     # look‑back distance (rad)
 T = 5       # time horizon (s)
 
+# Controller state
 index = None
 ds1 = ds2 = ds3 = None
 xx = None
@@ -91,15 +92,13 @@ async def send_actuator_command(bus, actuator_id, action):
     arb_id = arb_id_map.get(actuator_id)
     if arb_id is None:
         return
-
-    # use if / elif for open / close
+    # use if/elif for open/close
     if action == "open":
         data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
     elif action == "close":
         data = [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
     else:
         return
-
     await send_message_async(bus, arb_id, data, command=action)
 
 # ───────────────────────────────────────────────────────
@@ -107,7 +106,9 @@ async def send_actuator_command(bus, actuator_id, action):
 # ───────────────────────────────────────────────────────
 def load_signal_data():
     global heading_array, S, c
-    data = np.loadtxt(Path(__file__).parent / "signals2.txt")
+    path = Path(__file__).parent / "signals2.txt"
+    # explicitly tell NumPy to split on commas
+    data = np.loadtxt(path, delimiter=',')
     heading_array = data[0, :]
     S = data[1:, :]
     z = S.shape[0] // len(ACTUATOR_IDS)
@@ -128,12 +129,12 @@ async def controller(bus, a, b, vx, _unused):
         ds1 = np.insert(np.diff(s1), 0, s1[0])
         ds2 = np.insert(np.diff(s2), 0, s2[0])
         ds3 = np.insert(np.diff(s3), 0, s3[0])
-        xx = heading_array.copy() if (index + 1) % 2 == 1 else (L - heading_array)
+        xx = heading_array.copy() if (index+1)%2==1 else (L - heading_array)
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
-        if s1[0] == 1: await send_actuator_command(bus, 22, "open")
-        if s2[0] == 1: await send_actuator_command(bus, 24, "open")
-        if s3[0] == 1: await send_actuator_command(bus, 26, "open")
+        if s1[0]==1: await send_actuator_command(bus, 22, "open")
+        if s2[0]==1: await send_actuator_command(bus, 24, "open")
+        if s3[0]==1: await send_actuator_command(bus, 26, "open")
 
     if i >= len(xx):
         return
@@ -175,12 +176,11 @@ async def gps_streaming_task(gps_config_path, bus):
                 initial_x, initial_y = x, y
                 log_event(x=0.0, y=0.0)
             else:
-                log_event(x=x - initial_x, y=y - initial_y)
+                log_event(x=x-initial_x, y=y-initial_y)
             continue
 
         if isinstance(msg, gps_pb2.GpsFrame):
-            vx = msg.vel_north
-            vy = msg.vel_east
+            vx, vy = msg.vel_north, msg.vel_east
             log_event(vx=vx, vy=vy)
 
         b      = float(latest["y"] or 0.0)
@@ -200,11 +200,11 @@ async def listen_actuator_pdo(bus):
         msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
         aid = ID_TO_AID.get(msg.arbitration_id)
         if aid:
-            pos_raw = int.from_bytes(msg.data[0:2], "little")
-            spd_raw = int.from_bytes(msg.data[5:7], "little")
+            pos_mm = int.from_bytes(msg.data[0:2],"little")*0.1
+            spd_mms = int.from_bytes(msg.data[5:7],"little")*0.1
             log_event(**{
-                f"pdo_position_mm_{aid}": pos_raw * 0.1,
-                f"pdo_speed_mms_{aid}": spd_raw * 0.1
+                f"pdo_position_mm_{aid}": pos_mm,
+                f"pdo_speed_mms_{aid}": spd_mms
             })
 
 # ───────────────────────────────────────────────────────
@@ -212,13 +212,12 @@ async def listen_actuator_pdo(bus):
 # ───────────────────────────────────────────────────────
 async def main(gps_config_path):
     if not csv_file.exists():
-        with open(csv_file, "w", newline="") as f:
+        with open(csv_file,"w",newline="") as f:
             writer = csv.DictWriter(f, fieldnames=csv_headers)
             writer.writeheader()
 
     bus = setup_can_bus()
     await send_initial_can_commands(bus)
-
     await asyncio.gather(
         gps_streaming_task(gps_config_path, bus),
         listen_actuator_pdo(bus),
