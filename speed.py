@@ -101,7 +101,7 @@ async def send_actuator_command_with_feedback(bus, actuator_id, action):
         return
 
     if action == 'open':
-        run_cmd = [0xE8, 0x03, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # Run Out
+        run_cmd = [0x01, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # Run Out
     elif action == 'close':
         run_cmd = [0x02, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]  # Run In
     else:
@@ -109,7 +109,7 @@ async def send_actuator_command_with_feedback(bus, actuator_id, action):
         return
 
     await send_message_async(bus, arb_id, run_cmd, action)
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
 
     pos, spd = await read_sdo_feedback(bus, actuator_id)
     log_event("ACTUATOR_FEEDBACK", actuator_id=actuator_id, command=action, position=pos, speed=spd)
@@ -135,9 +135,12 @@ async def listen_actuator_pdo(bus):
         msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
         if msg.arbitration_id == 0x1A2:
             data = msg.data
-            pos_mm = int.from_bytes(data[1:3], byteorder='little') * 0.1
+            pos_mm = 100.0 - int.from_bytes(data[1:3], byteorder='little') * 0.1
             print(f"PDO Feedback: Position ~ {pos_mm:.1f} mm | Raw: {[hex(b) for b in data]}")
             log_event("PDO_FEEDBACK", actuator_id="22", position=pos_mm)
+        elif msg.arbitration_id == 0x1A0:
+            print(f"RAW 0x1A0 DATA: {[hex(b) for b in msg.data]}")
+            log_event("RAW_1A0", actuator_id="22", command="", position=None, speed=None)
 
 def print_gps_frame(msg):
     vx = msg.vel_north
@@ -164,9 +167,9 @@ async def gps_streaming_task(gps_config_path):
             print_gps_frame(msg)
 
 async def actuator_task(bus):
-    await asyncio.sleep(20)
+    await asyncio.sleep(5)
     await send_actuator_command_with_feedback(bus, 22, 'open')
-    await asyncio.sleep(10)
+    await asyncio.sleep(15)
     await send_actuator_command_with_feedback(bus, 22, 'close')
 
 async def main(gps_config_path):
