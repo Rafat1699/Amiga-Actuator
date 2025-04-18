@@ -27,7 +27,9 @@ T = 5       # time horizon (s)
 index = None
 ds1 = ds2 = ds3 = None
 xx = None
-i = 0
+i1 = 0
+i2 = 0
+i3 = 0
 
 heading_array = None
 S = None
@@ -142,26 +144,34 @@ async def controller(bus, a, b, vx, _unused):
         if s2[0] == 1: await send_actuator_command(bus, 24, "open")
         if s3[0] == 1: await send_actuator_command(bus, 26, "open")
 
-    if i >= len(xx):
+    if i1 >= len(xx):
+        return
+    
+    if i2 >= len(xx):
+        return
+    
+    if i3 >= len(xx):
         return
 
-    w = xx[i]
+    w1 = xx[i1]
+    w2 = xx[i2]
+    w3 = xx[i3]
     lookahead = a - d + T * vx
 
-    if lookahead > w and ds1[i] == 1:
-        await send_actuator_command(bus, 22, "open");  i += 1
-    elif lookahead < w and ds1[i] == -1:
-        await send_actuator_command(bus, 22, "close"); i += 1
+    if lookahead > w1 and ds1[i1] == 1:
+        await send_actuator_command(bus, 22, "open");  i1 += 1
+    elif lookahead > w1 and ds1[i1] == -1:
+        await send_actuator_command(bus, 22, "close"); i1 += 1
 
-    if lookahead > w and ds2[i] == 1:
-        await send_actuator_command(bus, 24, "open");  i += 1
-    elif lookahead < w and ds2[i] == -1:
-        await send_actuator_command(bus, 24, "close"); i += 1
+    if lookahead > w2 and ds2[i2] == 1:
+        await send_actuator_command(bus, 24, "open");  i2 += 1
+    elif lookahead > w2 and ds2[i2] == -1:
+        await send_actuator_command(bus, 24, "close"); i2 += 1
 
-    if lookahead > w and ds3[i] == 1:
-        await send_actuator_command(bus, 26, "open");  i += 1
-    elif lookahead < w and ds3[i] == -1:
-        await send_actuator_command(bus, 26, "close"); i += 1
+    if lookahead > w3 and ds3[i3] == 1:
+        await send_actuator_command(bus, 26, "open");  i3 += 1
+    elif lookahead > w3 and ds3[i3] == -1:
+        await send_actuator_command(bus, 26, "close"); i3 += 1
 
     if a > xx[-1]:
         for aid in ACTUATOR_IDS:
