@@ -20,10 +20,11 @@ CAN_CHANNEL = 'can0'
 ACTUATOR_IDS = [22, 24, 26]
 
 L = 30.48   # field length (m)
-d = 0.9     # look‑back distance (rad)
+d = 0.9     # look‑back distance (m)
 T = 5       # time horizon (s)
 
 # Signals & controller state
+a = b = None
 heading_array = None
 S = None
 c = None
@@ -55,12 +56,6 @@ csv_headers = [
     "lookahead1","lookahead2",
     # GPS
     "x","y","vx","vy",
-    # raw CAN
-    "raw_can_id","raw_can_data",
-    # PDO
-    "pdo_position_mm_22","pdo_speed_mms_22",
-    "pdo_position_mm_24","pdo_speed_mms_24",
-    "pdo_position_mm_26","pdo_speed_mms_26",
 ]
 
 f_csv = open(csv_path, "w", newline="")
@@ -75,7 +70,6 @@ def log_row(**kwargs):
     for k, v in kwargs.items():
         if k not in row:
             continue
-        # arrays -> repr
         if isinstance(v, (list, np.ndarray)):
             row[k] = repr(list(v))
         elif isinstance(v, float):
@@ -85,15 +79,16 @@ def log_row(**kwargs):
     writer.writerow(row)
     f_csv.flush()
 
+# ───────────────────────────────────────────────────────
+# Update only GPS values
+# ───────────────────────────────────────────────────────
 def update_latest(**kwargs):
     for k, v in kwargs.items():
         if k in latest:
             latest[k] = v
-    # log GPS columns only
-    log_row(**{k: latest[k] for k in ("x","y","vx","vy")})
 
 # ───────────────────────────────────────────────────────
-# Load signals3.txt
+# Load signals3.txt (FIXED!)
 # ───────────────────────────────────────────────────────
 def load_signal_data():
     global heading_array, S, c, s1, s2, s3, ds1, ds2, ds3, xx
@@ -102,32 +97,29 @@ def load_signal_data():
     data = raw[:,1:]
     heading_array = data[0]
     S = data[1:]
-    z = S.shape[0] // len(ACTUATOR_IDS)
+    # FIX: use number of columns (waypoints), not rows ÷ actuators
+    z = S.shape[1]
     c = np.linspace(0, L, z)
-
-    # pick the 3 rows for this spatial block
-    # (we’ll assign actual s1,s2,s3 in first controller call)
-    print("signals3.txt loaded:", 
-          "heading=", heading_array, 
-          "shape S=", S.shape, "c=", c)
+    print(f"[DEBUG] signals3.txt loaded → heading_array: {heading_array}")
+    print(f"[DEBUG] S.shape: {S.shape}, computed c ({z} points): {c}")
 
 # ───────────────────────────────────────────────────────
 # CAN setup & send helpers
 # ───────────────────────────────────────────────────────
 def setup_can_bus():
     bus = can.interface.Bus(channel=CAN_CHANNEL, interface='socketcan')
-    print(f"CAN bus {CAN_CHANNEL} up")
+    print(f"[DEBUG] CAN bus {CAN_CHANNEL} up")
     return bus
 
 async def send_message(bus, arb_id, data, command=None):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     try:
         await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)
-        print(f"→ Sent 0x{arb_id:X} {data} ({command})")
+        print(f"[→ CAN] 0x{arb_id:X}: {data} ({command})")
         if command:
             log_row(command=command)
     except Exception as e:
-        print("CAN send error:", e)
+        print("!!! CAN send error:", e)
 
 async def send_initial(bus):
     cmds = []
@@ -138,27 +130,36 @@ async def send_initial(bus):
     for n in ACTUATOR_IDS:
         cmds.append((0x200+n, [0x00,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]))
 
-    print("Initializing actuators...")
+    print("[DEBUG] Initializing actuators...")
     for arb, d in cmds:
         await send_message(bus, arb, d, "INIT")
         await asyncio.sleep(0.1)
-    print("Init done")
+    print("[DEBUG] Init done")
 
 async def send_act(bus, aid, action):
-    arb_map = {22:0x222,24:0x224,26:0x226}
+    arb_map = {22:0x222, 24:0x224, 26:0x226}
     arb = arb_map.get(aid)
-    if not arb: return
+    if not arb:
+        print(f"[DEBUG] Unknown actuator ID {aid}")
+        return
     data = [0xE8,0x03,0xFB,0xFB,0xFB,0xFB,0x00,0x00] if action=="open" else [0x02,0xFB,0xFB,0xFB,0xFB,0xFB,0x00,0x00]
     await send_message(bus, arb, data, action)
 
 # ───────────────────────────────────────────────────────
-# Your ORIGINAL controller, PLUS logging all requested vars
+# CONTROLLER with DEBUGS
 # ───────────────────────────────────────────────────────
 async def controller(bus, b, a, vx, _):
     global index, ds1, ds2, ds3, xx, i1, i2, i3, s1, s2, s3
 
+    # Guard out‑of‑bounds before indexing
+    if index is not None and (i1>=len(xx) or i2>=len(xx) or i3>=len(xx)):
+        print("[DEBUG] All actuators have completed their sequences; skipping controller")
+        return
+
+    # First‐time initialization
     if index is None:
         load_signal_data()
+        # pick the segment whose c is closest to current lateral error b
         index = int(np.argmin(np.abs(c - b)))
         s1 = S[index*3    , :]
         s2 = S[index*3 + 1, :]
@@ -166,29 +167,43 @@ async def controller(bus, b, a, vx, _):
         ds1 = np.insert(np.diff(s1), 0, s1[0])
         ds2 = np.insert(np.diff(s2), 0, s2[0])
         ds3 = np.insert(np.diff(s3), 0, s3[0])
-        xx = heading_array.copy() if (index+1)%2 else (L-heading_array)
+        # sometimes reverse heading array to keep monotonic
+        xx = heading_array.copy() if (index+1)%2 else (L - heading_array)
 
+        print(f"[DEBUG] Initial index based on b={b:.3f}: index={index}")
+        print(f"[DEBUG] First actuator commands s1[0]={s1[0]}, s2[0]={s2[0]}, s3[0]={s3[0]}")
+
+        # Home/clamp all, then open those that start at 1
         for aid in ACTUATOR_IDS:
             await send_act(bus, aid, "close")
         if s1[0]==1: await send_act(bus, 22, "open")
         if s2[0]==1: await send_act(bus, 24, "open")
         if s3[0]==1: await send_act(bus, 26, "open")
 
+    # compute current thresholds & lookahead
     w1, w2, w3 = xx[i1], xx[i2], xx[i3]
-    lookahead1 = a - d + T*0.7
-    lookahead2 = a - d
+    lookahead1 = -b - d + T*0.7
+    lookahead2 = -b - d
 
-    # ─── LOG EVERYTHING HERE ───
+    # DEBUG: print every iteration
+    print(f"[DEBUG] i1,i2,i3 = {i1},{i2},{i3}")
+    print(f"        thresholds w1,w2,w3 = {w1:.3f}, {w2:.3f}, {w3:.3f}")
+    print(f"        lookahead1,2     = {lookahead1:.3f}, {lookahead2:.3f}")
+    print(f"        ds1[i1],ds2[i2],ds3[i3] = {ds1[i1]}, {ds2[i2]}, {ds3[i3]}")
+
+    # log one combined row
     log_row(
-        a=a, b=b,
+        a=-a, b=-b,
         s1=s1, s2=s2, s3=s3,
         ds1=ds1, ds2=ds2, ds3=ds3,
         w1=w1, w2=w2, w3=w3,
         i1=i1, i2=i2, i3=i3,
-        lookahead1=lookahead1, lookahead2=lookahead2
+        lookahead1=lookahead1, lookahead2=lookahead2,
+        x=latest["x"], y=latest["y"],
+        vx=latest["vx"], vy=latest["vy"]
     )
 
-    # your original flip logic
+    # decision logic
     if lookahead1> w1 and ds1[i1]==1:
         await send_act(bus,22,"open");  i1+=1
     elif lookahead2> w1 and ds1[i1]==-1:
@@ -204,42 +219,8 @@ async def controller(bus, b, a, vx, _):
     elif lookahead2> w3 and ds3[i3]==-1:
         await send_act(bus,26,"close"); i3+=1
 
-    if a> xx[-1]:
-        for aid in ACTUATOR_IDS:
-            await send_act(bus,aid,"close")
-
-    if i1>=len(xx) or i2>=len(xx) or i3>=len(xx):
-        return
-
 # ───────────────────────────────────────────────────────
-# PDO feedback logger
-# ───────────────────────────────────────────────────────
-ID2A = {0x1A2:22,0x1A4:24,0x1A6:26}
-async def listen_pdo(bus):
-    while True:
-        msg = await asyncio.get_event_loop().run_in_executor(None,bus.recv)
-        aid = ID2A.get(msg.arbitration_id)
-        if aid:
-            pos = int.from_bytes(msg.data[0:2],"little")*0.1
-            spd = int.from_bytes(msg.data[5:7],"little")*0.1
-            print(f"[PDO{aid}] pos={pos:.1f} spd={spd:.1f}")
-            log_row(**{
-                f"pdo_position_mm_{aid}":pos,
-                f"pdo_speed_mms_{aid}":spd
-            })
-
-# ───────────────────────────────────────────────────────
-# Raw CAN logger
-# ───────────────────────────────────────────────────────
-async def log_all_can(bus):
-    while True:
-        msg = await asyncio.get_event_loop().run_in_executor(None,bus.recv)
-        rid, data = msg.arbitration_id, list(msg.data)
-        print(f"[CAN] 0x{rid:X} {data}")
-        log_row(raw_can_id=hex(rid), raw_can_data=data)
-
-# ───────────────────────────────────────────────────────
-# GPS streaming + call controller
+# GPS streaming + controller
 # ───────────────────────────────────────────────────────
 async def gps_stream(gps_cfg, bus):
     global initial_x, initial_y
@@ -251,39 +232,32 @@ async def gps_stream(gps_cfg, bus):
             x, y = msg.relative_pose_north, msg.relative_pose_east
             if initial_x is None:
                 initial_x, initial_y = x, y
-                x_rel, y_rel = 0.0, 0.0
+                rel_x = rel_y = 0.0
             else:
-                x_rel, y_rel = x-initial_x, y-initial_y
-            print(f"[REL] x={x_rel:.3f} y={y_rel:.3f}")
-            update_latest(x=x_rel, y=y_rel)
+                rel_x, rel_y = x-initial_x, y-initial_y
+            update_latest(x=rel_x, y=rel_y)
+            print(f"[REL] x={rel_x:.3f}, y={rel_y:.3f}")
             continue
 
         if isinstance(msg, gps_pb2.GpsFrame):
             vx, vy = msg.vel_north, msg.vel_east
-            print(f"[VEL] vx={vx:.3f} vy={vy:.3f}")
             update_latest(vx=vx, vy=vy)
+            print(f"[VEL] vx={vx:.3f}, vy={vy:.3f}")
 
-        # feed your controller
-        b   = latest["y"]
-        vx0 = latest["vx"]
-        vy0 = latest["vy"]
-        a   = math.atan2(vx0, vy0)
-        await controller(bus, a, b, vx0, None)
+        b = latest["y"]
+        a = math.atan2(vx, vy)   # note axis order
+        await controller(bus, b, a, vx, None)
 
-# ───────────────────────────────────────────────────────
-# Main entry
 # ───────────────────────────────────────────────────────
 async def main(gps_cfg):
     bus = setup_can_bus()
     await send_initial(bus)
     await asyncio.gather(
-        log_all_can(bus),
-        listen_pdo(bus),
         gps_stream(gps_cfg, bus),
     )
 
-if __name__=="__main__":
-    p=argparse.ArgumentParser()
-    p.add_argument("--gps-service-config", type=Path, required=True)
-    args=p.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gps-service-config", type=Path, required=True)
+    args = parser.parse_args()
     asyncio.run(main(args.gps_service_config))
