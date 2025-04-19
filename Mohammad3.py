@@ -194,22 +194,22 @@ async def controller(bus, b, a, vx, _):
         i2+=1
         w2 = xx[i2]
     elif lookahead2> w2 and ds2[i2]==-1:
-        await send_act(bus,24,"close")
+        send_act(bus,24,"close")
         i2+=1
         w2 = xx[i2]
 
     if lookahead1> w3 and ds3[i3]==1:
-        await send_act(bus,26,"open")
+        send_act(bus,26,"open")
         i3+=1
         w3 = xx[i3]
     elif lookahead2> w3 and ds3[i3]==-1:
-        await send_act(bus,26,"close")
+        send_act(bus,26,"close")
         i3+=1
         w3 = xx[i3]
 
     if b< -xx[-1]:
         for aid in ACTUATOR_IDS:
-            await send_act(bus,aid,"close")
+            send_act(bus,aid,"close")
 
     if i1>=len(xx) or i2>=len(xx) or i3>=len(xx):
         return
