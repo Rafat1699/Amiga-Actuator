@@ -144,7 +144,7 @@ async def send_act(bus, aid, action):
 # ───────────────────────────────────────────────────────
 # ORIGINAL controller with full logging
 # ───────────────────────────────────────────────────────
-async def controller(bus, a, b, vx, _):
+async def controller(bus, b, a, vx, _):
     global index, ds1, ds2, ds3, xx, i1, i2, i3, s1, s2, s3
 
     if index is None:
@@ -237,7 +237,7 @@ async def gps_stream(gps_cfg, bus):
         vx0 = latest["vx"]
         vy0 = latest["vy"]
         a = math.atan2(vx0, vy0)
-        await controller(bus, a, b, vx0, None)
+        await controller(bus, b, a, vx0, None)
 
 # ───────────────────────────────────────────────────────
 async def main(gps_cfg):
