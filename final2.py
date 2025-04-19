@@ -113,16 +113,17 @@ def load_signal_data():
     global heading_array, S, c
 
     path = Path(__file__).parent / "signals3.txt"
-    # load as whitespace‑delimited floats (tabs/spaces)
-    raw = np.loadtxt(path, delim_whitespace=True)
-    # drop the first column (row index)
+    # plain load—NumPy will split on any whitespace by default
+    raw = np.loadtxt(path)
+
+    # drop the first “index” column
     data = raw[:, 1:]
 
-    # first row = headings, rest = signals
+    # first row = headings, rest = your 3×N signal blocks
     heading_array = data[0, :]
     S = data[1:, :]
 
-    # number of “blocks” = rows / number of actuators
+    # z blocks = total_rows / number_of_actuators
     z = S.shape[0] // len(ACTUATOR_IDS)
     c = np.linspace(0, L, z)
 
@@ -148,9 +149,7 @@ async def controller(bus, a, b, vx, _):
         if s2[0]==1: await send_actuator_command(bus, 24, "open")
         if s3[0]==1: await send_actuator_command(bus, 26, "open")
 
-    w1 = xx[i1]
-    w2 = xx[i2]
-    w3 = xx[i3]
+    w1 = xx[i1]; w2 = xx[i2]; w3 = xx[i3]
     lookahead = a - d + T*vx
 
     if lookahead > w1 and ds1[i1]==1:
@@ -172,12 +171,11 @@ async def controller(bus, a, b, vx, _):
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
 
-    # stop once all indices run out
     if i1 >= len(xx) or i2 >= len(xx) or i3 >= len(xx):
         return
 
 # ───────────────────────────────────────────────────────
-# GPS Streaming Task (with terminal prints)
+# GPS Streaming Task
 # ───────────────────────────────────────────────────────
 async def gps_streaming_task(gps_config_path, bus):
     global initial_x, initial_y
