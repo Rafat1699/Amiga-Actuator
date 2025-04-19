@@ -151,6 +151,7 @@ async def controller(bus, a, b, vx, _):
 
     w1 = xx[i1]; w2 = xx[i2]; w3 = xx[i3]
     lookahead1 = a - d + T*0.7
+    lookahead2 = a - d
 
     if lookahead1 > w1 and ds1[i1]==1:
         await send_actuator_command(bus, 22, "open");  i1 += 1
