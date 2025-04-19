@@ -1,5 +1,4 @@
-```python
-#!/usr/bin/env python3
+
 import can
 import asyncio
 import math
@@ -238,12 +237,13 @@ async def gps_stream(gps_cfg, bus):
 async def main(gps_cfg):
     bus = setup_can_bus()
     await send_initial(bus)
-    # only GPS-driven controller
-    await gps_stream(gps_cfg, bus)
+    await asyncio.gather(
+        gps_stream(gps_cfg, bus),
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gps-service-config", type=Path, required=True)
     args = parser.parse_args()
     asyncio.run(main(args.gps_service_config))
-```
+
