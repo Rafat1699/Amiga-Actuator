@@ -107,16 +107,24 @@ async def send_actuator_command(bus, actuator_id, action):
     await send_message_async(bus, arb_id, data, command=action)
 
 # ───────────────────────────────────────────────────────
-# Signal Data Loader (signals2.txt)
+# Signal Data Loader (signals3.txt)
 # ───────────────────────────────────────────────────────
 def load_signal_data():
     global heading_array, S, c
+
     path = Path(__file__).parent / "signals3.txt"
-    data = np.loadtxt(path, delimiter=',')
+    # load as whitespace‑delimited floats (tabs/spaces)
+    raw = np.loadtxt(path, delim_whitespace=True)
+    # drop the first column (row index)
+    data = raw[:, 1:]
+
+    # first row = headings, rest = signals
     heading_array = data[0, :]
     S = data[1:, :]
+
+    # number of “blocks” = rows / number of actuators
     z = S.shape[0] // len(ACTUATOR_IDS)
-    c = [-5]
+    c = np.linspace(0, L, z)
 
 # ───────────────────────────────────────────────────────
 # Controller (delta‑signal logic)
@@ -140,37 +148,32 @@ async def controller(bus, a, b, vx, _):
         if s2[0]==1: await send_actuator_command(bus, 24, "open")
         if s3[0]==1: await send_actuator_command(bus, 26, "open")
 
-
-
     w1 = xx[i1]
     w2 = xx[i2]
     w3 = xx[i3]
     lookahead = a - d + T*vx
 
     if lookahead > w1 and ds1[i1]==1:
-        await send_actuator_command(bus, 22, "open");  i1+=1
+        await send_actuator_command(bus, 22, "open");  i1 += 1
     elif lookahead < w1 and ds1[i1]==-1:
-        await send_actuator_command(bus, 22, "close"); i1+=1
+        await send_actuator_command(bus, 22, "close"); i1 += 1
 
     if lookahead > w2 and ds2[i2]==1:
-        await send_actuator_command(bus, 24, "open");  i2+=1
+        await send_actuator_command(bus, 24, "open");  i2 += 1
     elif lookahead < w2 and ds2[i2]==-1:
-        await send_actuator_command(bus, 24, "close"); i2+=1
+        await send_actuator_command(bus, 24, "close"); i2 += 1
 
     if lookahead > w3 and ds3[i3]==1:
-        await send_actuator_command(bus, 26, "open");  i3+=1
+        await send_actuator_command(bus, 26, "open");  i3 += 1
     elif lookahead < w3 and ds3[i3]==-1:
-        await send_actuator_command(bus, 26, "close"); i3+=1
+        await send_actuator_command(bus, 26, "close"); i3 += 1
 
     if a > xx[-1]:
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
-    
-    if i1 >= len(xx):
-        return
-    if i2 >= len(xx):
-        return
-    if i3 >= len(xx):
+
+    # stop once all indices run out
+    if i1 >= len(xx) or i2 >= len(xx) or i3 >= len(xx):
         return
 
 # ───────────────────────────────────────────────────────
@@ -182,7 +185,6 @@ async def gps_streaming_task(gps_config_path, bus):
     async for _, msg in EventClient(config).subscribe(config.subscriptions[0]):
 
         if isinstance(msg, gps_pb2.RelativePositionFrame):
-            # update and log x,y
             x = msg.relative_pose_north
             y = msg.relative_pose_east
             if initial_x is None:
@@ -192,21 +194,15 @@ async def gps_streaming_task(gps_config_path, bus):
             else:
                 log_event(x=x-initial_x, y=y-initial_y)
                 x, y = x-initial_x, y-initial_y
-
-            # print current x,y
             print(f"[REL_POS] x = {x:.3f}, y = {y:.3f}")
             continue
 
         if isinstance(msg, gps_pb2.GpsFrame):
-            # update and log vx,vy
             vx = msg.vel_north
             vy = msg.vel_east
             log_event(vx=vx, vy=vy)
-
-            # print current vx,vy
             print(f"[GPS   ] vx = {vx:.3f}, vy = {vy:.3f}")
 
-        # safe float conversion for controller
         b      = float(latest["y"]  or 0.0)
         vx_now = float(latest["vx"] or 0.0)
         vy_now = float(latest["vy"] or 0.0)
@@ -215,7 +211,7 @@ async def gps_streaming_task(gps_config_path, bus):
         await controller(bus, a, b, vx_now, None)
 
 # ───────────────────────────────────────────────────────
-# PDO Listener Task (unchanged)
+# PDO Listener Task
 # ───────────────────────────────────────────────────────
 ID_TO_AID = {0x1A2:22, 0x1A4:24, 0x1A6:26}
 
@@ -224,8 +220,8 @@ async def listen_actuator_pdo(bus):
         msg = await asyncio.get_event_loop().run_in_executor(None, bus.recv)
         aid = ID_TO_AID.get(msg.arbitration_id)
         if aid:
-            pos_mm = int.from_bytes(msg.data[0:2], "little")*0.1
-            spd_mms= int.from_bytes(msg.data[5:7], "little")*0.1
+            pos_mm  = int.from_bytes(msg.data[0:2], "little") * 0.1
+            spd_mms = int.from_bytes(msg.data[5:7], "little") * 0.1
             log_event(**{
                 f"pdo_position_mm_{aid}": pos_mm,
                 f"pdo_speed_mms_{aid}": spd_mms
@@ -236,7 +232,7 @@ async def listen_actuator_pdo(bus):
 # ───────────────────────────────────────────────────────
 async def main(gps_config_path):
     if not csv_file.exists():
-        with open(csv_file,"w",newline="") as f:
+        with open(csv_file, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=csv_headers)
             writer.writeheader()
 
@@ -247,7 +243,7 @@ async def main(gps_config_path):
         listen_actuator_pdo(bus),
     )
 
-if __name__=="__main__":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gps-service-config", type=Path, required=True)
     args = parser.parse_args()
