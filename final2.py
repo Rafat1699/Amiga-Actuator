@@ -150,21 +150,21 @@ async def controller(bus, a, b, vx, _):
         if s3[0]==1: await send_actuator_command(bus, 26, "open")
 
     w1 = xx[i1]; w2 = xx[i2]; w3 = xx[i3]
-    lookahead = a - d + T*vx
+    lookahead1 = a - d + T*0.7
 
-    if lookahead > w1 and ds1[i1]==1:
+    if lookahead1 > w1 and ds1[i1]==1:
         await send_actuator_command(bus, 22, "open");  i1 += 1
-    elif lookahead < w1 and ds1[i1]==-1:
+    elif lookahead2 > w1 and ds1[i1]==-1:
         await send_actuator_command(bus, 22, "close"); i1 += 1
 
-    if lookahead > w2 and ds2[i2]==1:
+    if lookahead1 > w2 and ds2[i2]==1:
         await send_actuator_command(bus, 24, "open");  i2 += 1
-    elif lookahead < w2 and ds2[i2]==-1:
+    elif lookahead2 > w2 and ds2[i2]==-1:
         await send_actuator_command(bus, 24, "close"); i2 += 1
 
-    if lookahead > w3 and ds3[i3]==1:
+    if lookahead1 > w3 and ds3[i3]==1:
         await send_actuator_command(bus, 26, "open");  i3 += 1
-    elif lookahead < w3 and ds3[i3]==-1:
+    elif lookahead2 > w3 and ds3[i3]==-1:
         await send_actuator_command(bus, 26, "close"); i3 += 1
 
     if a > xx[-1]:
