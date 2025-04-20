@@ -118,9 +118,14 @@ async def send_actuator_command(bus, actuator_id, action):
 
 # ─── Reusable actuator trigger function ─────────────────────────
 async def check_and_actuate(y, trigger_y_list, signal_list, actuator_id, index, bus):
-    while index < len(trigger_y_list) and abs(y)+ 3.6 >= trigger_y_list[index]:
+    while index < len(trigger_y_list):
         signal = signal_list[index]
-        action = "open" if signal == 1 else "close"
+        if signal == 1 and abs(y)+ 2.6 >= trigger_y_list[index]:
+            action = "open" 
+        elif signal == 0 and abs(y)- 0.9 >= trigger_y_list[index]:
+            action = "close"      
+        else:
+            action = "close"
         print(f"[DEBUG] At Y={y:.2f}, Actuator {actuator_id} → {action.upper()} (signal={signal})")
         await send_actuator_command(bus, actuator_id, action)
         index += 1
