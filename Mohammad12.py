@@ -162,24 +162,24 @@ async def controller(bus, b, a, vx, _):
     )
 
     # Actuator 1
-    if i1<len(xx) and s1[i1]==1:
-        if lookahead1>w1:
+    if i1<len(xx):
+        if lookahead1>w1 and s1[i1]==1:
             await send_actuator_command(bus, 22, "open"); i1+=1
-        elif lookahead2>w1:
+        elif lookahead2>w1 and s1[i1]==0:
             await send_actuator_command(bus, 22, "close"); i1+=1
 
     # Actuator 2
-    if i2<len(xx) and s2[i2]==1:
-        if lookahead1>w2:
+    if i2<len(xx):
+        if lookahead1>w2 and s2[i2]==1:
             await send_actuator_command(bus, 24, "open"); i2+=1
-        elif lookahead2>w2:
+        elif lookahead2>w2 and s2[i2]==0:
             await send_actuator_command(bus, 24, "close"); i2+=1
 
-    # Actuator 3   ← fixed to use s3, w3, actuator_id=26
-    if i3<len(xx) and s3[i3]==1:
-        if lookahead1>w3:
+    # Actuator 3
+    if i3<len(xx):
+        if lookahead1>w3  and s3[i3]==1:
             await send_actuator_command(bus, 26, "open"); i3+=1
-        elif lookahead2>w3:
+        elif lookahead2>w3 and s3[i3]==0:
             await send_actuator_command(bus, 26, "close"); i3+=1
 
     # final close if past last waypoint
