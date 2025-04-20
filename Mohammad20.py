@@ -18,14 +18,14 @@ CAN_CHANNEL = 'can0'
 ACTUATOR_IDS = [22, 24, 26]
 TRIGGER_Y = []
 SIGNALS = {}
-trigger_indices = {22: 0, 24: 0, 26: 0}
+trigger_indices = {"22": 0, "24": 0, "26": 0}
 
 initial_x = initial_y = None
 latest = {"x": 0.0, "y": 0.0, "vx": 0.0, "vy": 0.0}
 
 # ─── CSV Setup ─────────────────────────────────────────────────
 csv_path = Path(__file__).parent / "gps_can_log.csv"
-csv_headers = ["time_sec", "command", "actuator", "y", "index", "signal", "vx", "vy"]
+csv_headers = ["time_sec", "command", "y", "vx", "vy"]
 f_csv = open(csv_path, "w", newline="")
 writer = csv.DictWriter(f_csv, fieldnames=csv_headers)
 writer.writeheader()
@@ -50,7 +50,7 @@ def update_latest(**kwargs):
         if k in latest:
             latest[k] = v
 
-# ─── Load signal data and print vectors ────────────────────────
+# ─── Load signal data ───────────────────────────────────────────
 def load_signal_data():
     global TRIGGER_Y, SIGNALS
     path = Path(__file__).parent / "signals3.txt"
@@ -62,22 +62,18 @@ def load_signal_data():
         26: raw[3, :].astype(int)
     }
     print("✅ Loaded signal triggers")
-    print("📊 Signal Map:")
-    for aid in ACTUATOR_IDS:
-        print(f"Actuator {aid}: {SIGNALS[aid]}")
 
-# ─── CAN Setup and Messaging ───────────────────────────────────
+# ─── CAN Helpers ────────────────────────────────────────────────
 def setup_can_bus():
     return can.interface.Bus(channel=CAN_CHANNEL, interface='socketcan')
 
-async def send_message(bus, arb_id, data, command=None, actuator_id=None, index=None, signal=None):
+async def send_message(bus, arb_id, data, command=None):
     msg = can.Message(arbitration_id=arb_id, data=bytes(data), is_extended_id=False)
     try:
         await asyncio.get_event_loop().run_in_executor(None, bus.send, msg)
         print(f"→ Sent 0x{arb_id:X}: {data} ({command})")
         if command:
-            log_row(command=command, actuator=actuator_id, index=index, signal=signal,
-                    y=latest["y"], vx=latest["vx"], vy=latest["vy"])
+            log_row(command=command, y=latest["y"], vx=latest["vx"], vy=latest["vy"])
     except Exception as e:
         print("CAN send error:", e)
 
@@ -106,7 +102,7 @@ async def send_initial(bus):
 
     print("✅ Init complete")
 
-async def send_actuator_command(bus, actuator_id, action, index, signal):
+async def send_actuator_command(bus, actuator_id, action):
     arb_map = {22: 0x222, 24: 0x224, 26: 0x226}
     arb = arb_map.get(actuator_id)
     if arb is None:
@@ -117,23 +113,36 @@ async def send_actuator_command(bus, actuator_id, action, index, signal):
         cmd = [0x02, 0xFB, 0xFB, 0xFB, 0xFB, 0xFB, 0x00, 0x00]
     else:
         return
-    await send_message(bus, arb, cmd, f"{action.upper()}_{actuator_id}", actuator_id, index, signal)
+    await send_message(bus, arb, cmd, f"{action.upper()}_{actuator_id}")
     await asyncio.sleep(0.2)
 
-# ─── Modular Actuation ─────────────────────────────────────────
-async def check_and_actuate(y, actuator_id, index, bus):
-    while index < len(TRIGGER_Y) and abs(y) >= TRIGGER_Y[index]:
-        signal = SIGNALS[actuator_id][index]
-        action = "open" if signal == 1 else "close"
-        print(f"[DEBUG] Actuator {actuator_id} at Y={y:.2f} | Index={index} | Signal={signal} → {action.upper()}")
-        await send_actuator_command(bus, actuator_id, action, index, signal)
+# ─── Reusable actuator trigger function ─────────────────────────
+async def check_and_actuate(y, trigger_y_list, signal_list, actuator_id, index, bus):
+    while index < len(trigger_y_list):
+        signal = signal_list[index]
+        if signal == 1 and abs(y)+ 2.6 >= trigger_y_list[index]:
+            action = "open" 
+        elif signal == 0 and abs(y)- 0.9 >= trigger_y_list[index]:
+            action = "close"      
+        print(f"[DEBUG] At Y={y:.2f}, Actuator {actuator_id} → {action.upper()} (signal={signal})")
+        await send_actuator_command(bus, actuator_id, action)
         index += 1
     return index
 
+# ─── Controller ────────────────────────────────────────────────
 async def controller(bus):
     abs_y = abs(latest["y"])
-    for aid in ACTUATOR_IDS:
-        trigger_indices[aid] = await check_and_actuate(abs_y, aid, trigger_indices[aid], bus)
+
+    # Update each actuator using the reusable function
+    trigger_indices["22"] = await check_and_actuate(
+        abs_y, TRIGGER_Y, SIGNALS[22], 22, trigger_indices["22"], bus
+    )
+    trigger_indices["24"] = await check_and_actuate(
+        abs_y, TRIGGER_Y, SIGNALS[24], 24, trigger_indices["24"], bus
+    )
+    trigger_indices["26"] = await check_and_actuate(
+        abs_y, TRIGGER_Y, SIGNALS[26], 26, trigger_indices["26"], bus
+    )
 
 # ─── GPS Loop ──────────────────────────────────────────────────
 async def gps_stream(gps_cfg, bus):
