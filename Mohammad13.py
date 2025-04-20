@@ -108,7 +108,6 @@ async def send_initial(bus):
         sdo_cw = [0x2B,0x40,0x60,0x00, cw&0xFF, cw>>8,0x00,0x00]
         await send_message(bus, 0x600+node, sdo_cw, f"ENABLE_{node}")
         await asyncio.sleep(0.05)
-    # Your original init sequence
     cmds = []
     for n in ACTUATOR_IDS:
         cmds.append((0x600+n, [0x23,0x16,0x10,0x01,0xC8,0x00,0x01,0x00]))
@@ -138,12 +137,13 @@ async def controller(bus, b, a, vx, _):
         load_signal_data()
         index = int(np.argmin(np.abs(c - b)))
         xx = heading_array.copy() if (index+1)%2 else (L - heading_array)
-        # set initial states
+
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
         if s1[0]: await send_actuator_command(bus, 22, "open")
         if s2[0]: await send_actuator_command(bus, 24, "open")
         if s3[0]: await send_actuator_command(bus, 26, "open")
+
     w1 = xx[i1] if i1<len(xx) else None
     w2 = xx[i2] if i2<len(xx) else None
     w3 = xx[i3] if i3<len(xx) else None
@@ -151,49 +151,48 @@ async def controller(bus, b, a, vx, _):
     lookahead2 = -b - d
 
     log_row(
-      a=-a, b=-b,
-      s1=s1, s2=s2, s3=s3,
-      ds1=ds1, ds2=ds2, ds3=ds3,
-      w1=w1, w2=w2, w3=w3,
-      i1=i1, i2=i2, i3=i3,
-      lookahead1=lookahead1, lookahead2=lookahead2,
-      x=latest["x"], y=latest["y"],
-      vx=latest["vx"], vy=latest["vy"],
+        a=-a, b=-b,
+        s1=s1, s2=s2, s3=s3,
+        ds1=ds1, ds2=ds2, ds3=ds3,
+        w1=w1, w2=w2, w3=w3,
+        i1=i1, i2=i2, i3=i3,
+        lookahead1=lookahead1, lookahead2=lookahead2,
+        x=latest["x"], y=latest["y"],
+        vx=latest["vx"], vy=latest["vy"],
     )
 
     # Actuator 1
-    if i1<len(xx):
-        if lookahead1>w1 and s1[i1]==1:
-            await send_actuator_command(bus, 22, "open"); i1+=1
-        elif lookahead2>w1 and s1[i1]==0:
-            await send_actuator_command(bus, 22, "close"); i1+=1
-        else:
-          pass
+    if i1 < len(xx):
+        if not s1[i1] and lookahead2 > xx[i1]:
+            await send_actuator_command(bus, 22, "close")
+            i1 += 1
+        elif s1[i1] and lookahead1 > xx[i1]:
+            await send_actuator_command(bus, 22, "open")
+            i1 += 1
 
     # Actuator 2
-    if i2<len(xx):
-        if lookahead1>w2 and s2[i2]==1:
-            await send_actuator_command(bus, 24, "open"); i2+=1
-        elif lookahead2>w2 and s2[i2]==0:
-            await send_actuator_command(bus, 24, "close"); i2+=1
-        else:
-            pass
+    if i2 < len(xx):
+        if not s2[i2] and lookahead2 > xx[i2]:
+            await send_actuator_command(bus, 24, "close")
+            i2 += 1
+        elif s2[i2] and lookahead1 > xx[i2]:
+            await send_actuator_command(bus, 24, "open")
+            i2 += 1
 
     # Actuator 3
-    if i3<len(xx):
-        if lookahead1>w3  and s3[i3]==1:
-            await send_actuator_command(bus, 26, "open"); i3+=1
-        elif lookahead2>w3 and s3[i3]==0:
-            await send_actuator_command(bus, 26, "close"); i3+=1
-        else:
-          pass
+    if i3 < len(xx):
+        if not s3[i3] and lookahead2 > xx[i3]:
+            await send_actuator_command(bus, 26, "close")
+            i3 += 1
+        elif s3[i3] and lookahead1 > xx[i3]:
+            await send_actuator_command(bus, 26, "open")
+            i3 += 1
 
-    # final close if past last waypoint
     if b > -xx[-1]:
         for aid in ACTUATOR_IDS:
             await send_actuator_command(bus, aid, "close")
 
-# ─── GPS + Controller Loop ─────────────────────────────────────
+# ─── GPS Loop ──────────────────────────────────────────────────
 async def gps_stream(gps_cfg, bus):
     global initial_x, initial_y
     cfg = proto_from_json_file(gps_cfg, EventServiceConfig())
@@ -210,11 +209,11 @@ async def gps_stream(gps_cfg, bus):
             print(f"[VEL] {vx:.3f}, {vy:.3f}")
             update_latest(vx=vx, vy=vy)
 
-        # run controller on every frame
         b = latest["y"]
         a = math.atan2(latest["vx"], latest["vy"])
         await controller(bus, b, a, latest["vx"], None)
 
+# ─── Main ──────────────────────────────────────────────────────
 async def main(gps_cfg):
     bus = setup_can_bus()
     await send_initial(bus)
