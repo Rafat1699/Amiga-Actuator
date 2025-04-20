@@ -50,7 +50,7 @@ def update_latest(**kwargs):
         if k in latest:
             latest[k] = v
 
-# ─── Load signal data ───────────────────────────────────────────
+# ─── Load signal data and print vectors ────────────────────────
 def load_signal_data():
     global TRIGGER_Y, SIGNALS
     path = Path(__file__).parent / "signals3.txt"
@@ -62,8 +62,11 @@ def load_signal_data():
         26: raw[3, :].astype(int)
     }
     print("✅ Loaded signal triggers")
+    print("📊 Signal Map:")
+    for aid in ACTUATOR_IDS:
+        print(f"Actuator {aid}: {SIGNALS[aid]}")
 
-# ─── CAN Helpers ────────────────────────────────────────────────
+# ─── CAN Setup and Messaging ───────────────────────────────────
 def setup_can_bus():
     return can.interface.Bus(channel=CAN_CHANNEL, interface='socketcan')
 
@@ -117,7 +120,7 @@ async def send_actuator_command(bus, actuator_id, action, index, signal):
     await send_message(bus, arb, cmd, f"{action.upper()}_{actuator_id}", actuator_id, index, signal)
     await asyncio.sleep(0.2)
 
-# ─── Modular Controller Function ───────────────────────────────
+# ─── Modular Actuation ─────────────────────────────────────────
 async def check_and_actuate(y, actuator_id, index, bus):
     while index < len(TRIGGER_Y) and abs(y) >= TRIGGER_Y[index]:
         signal = SIGNALS[actuator_id][index]
@@ -127,7 +130,6 @@ async def check_and_actuate(y, actuator_id, index, bus):
         index += 1
     return index
 
-# ─── Main Controller ───────────────────────────────────────────
 async def controller(bus):
     abs_y = abs(latest["y"])
     for aid in ACTUATOR_IDS:
