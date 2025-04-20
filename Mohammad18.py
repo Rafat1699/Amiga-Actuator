@@ -116,7 +116,7 @@ async def send_actuator_command(bus, actuator_id, action):
     await send_message(bus, arb, cmd, f"{action.upper()}_{actuator_id}")
     await asyncio.sleep(0.2)
 
-# ─── Controller with Debug ─────────────────────────────────────
+# ─── Controller: OPEN if 1, CLOSE if 0 ─────────────────────────
 async def controller(bus):
     abs_y = abs(latest["y"])
 
@@ -127,8 +127,7 @@ async def controller(bus):
             signal = SIGNALS[actuator_id][i]
             action = "open" if signal == 1 else "close"
 
-            # 👇 Debugging print for each actuator decision
-            print(f"[DEBUG] At Y={abs_y:.2f}, triggering Actuator {actuator_id} with signal {signal} → {action.upper()}")
+            print(f"[DEBUG] At Y={abs_y:.2f}, Actuator {actuator_id} → {action.upper()} (signal={signal})")
 
             await send_actuator_command(bus, actuator_id, action)
             trigger_indices[str(actuator_id)] += 1
