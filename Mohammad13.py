@@ -133,20 +133,20 @@ async def send_actuator_command(bus, actuator_id, action):
 # ─── Controller ────────────────────────────────────────────────
 async def controller(bus, b, a, vx, _):
     global index, xx, i1, i2, i3
-    if index is None:
-        load_signal_data()
-        index = int(np.argmin(np.abs(c - b)))
-        xx = heading_array.copy() if (index+1)%2 else (L - heading_array)
+   # if index is None:
+       # load_signal_data()
+       # index = int(np.argmin(np.abs(c - b)))
+       # xx = heading_array.copy() if (index+1)%2 else (L - heading_array)
 
-        for aid in ACTUATOR_IDS:
-            await send_actuator_command(bus, aid, "close")
-        if s1[0]: await send_actuator_command(bus, 22, "open")
-        if s2[0]: await send_actuator_command(bus, 24, "open")
-        if s3[0]: await send_actuator_command(bus, 26, "open")
+       # for aid in ACTUATOR_IDS:
+           # await send_actuator_command(bus, aid, "close")
+        #if s1[0]: await send_actuator_command(bus, 22, "open")
+        #if s2[0]: await send_actuator_command(bus, 24, "open")
+        #if s3[0]: await send_actuator_command(bus, 26, "open")
 
-    w1 = xx[i1] if i1<len(xx) else None
-    w2 = xx[i2] if i2<len(xx) else None
-    w3 = xx[i3] if i3<len(xx) else None
+    w1 = xx[i1] #if i1<len(xx) else None
+    w2 = xx[i2] #if i2<len(xx) else None
+    w3 = xx[i3] #if i3<len(xx) else None
     lookahead1 = -b - d + T*0.9
     lookahead2 = -b - d
 
@@ -163,34 +163,37 @@ async def controller(bus, b, a, vx, _):
 
     # Actuator 1
     if i1 < len(xx):
-        if not s1[i1] and lookahead2 > xx[i1]:
-            await send_actuator_command(bus, 22, "close")
-            i1 += 1
-        elif s1[i1] and lookahead1 > xx[i1]:
+        #if not s1[i1] and lookahead2 > xx[i1]:
+           # await send_actuator_command(bus, 22, "close")
+            #i1 += 1
+           # pass
+        if s1[i1] and lookahead1 > xx[i1]:
             await send_actuator_command(bus, 22, "open")
             i1 += 1
 
     # Actuator 2
-    if i2 < len(xx):
-        if not s2[i2] and lookahead2 > xx[i2]:
-            await send_actuator_command(bus, 24, "close")
-            i2 += 1
-        elif s2[i2] and lookahead1 > xx[i2]:
+    #if i2 < len(xx):
+       # if not s2[i2] and lookahead2 > xx[i2]:
+           # await send_actuator_command(bus, 24, "close")
+          #  i2 += 1
+            #pass
+        if s2[i2] and lookahead1 > xx[i2]:
             await send_actuator_command(bus, 24, "open")
             i2 += 1
 
     # Actuator 3
     if i3 < len(xx):
-        if not s3[i3] and lookahead2 > xx[i3]:
-            await send_actuator_command(bus, 26, "close")
-            i3 += 1
-        elif s3[i3] and lookahead1 > xx[i3]:
+        #if not s3[i3] and lookahead2 > xx[i3]:
+           # await send_actuator_command(bus, 26, "close")
+           # i3 += 1
+            #pass
+        if s3[i3] and lookahead1 > xx[i3]:
             await send_actuator_command(bus, 26, "open")
             i3 += 1
 
-    if b > -xx[-1]:
-        for aid in ACTUATOR_IDS:
-            await send_actuator_command(bus, aid, "close")
+   # if b > -xx[-1]:
+       # for aid in ACTUATOR_IDS:
+           # await send_actuator_command(bus, aid, "close")
 
 # ─── GPS Loop ──────────────────────────────────────────────────
 async def gps_stream(gps_cfg, bus):
@@ -211,7 +214,7 @@ async def gps_stream(gps_cfg, bus):
 
         b = latest["y"]
         a = math.atan2(latest["vx"], latest["vy"])
-        await controller(bus, b, a, latest["vx"], None)
+        await controller(bus, b, a, latest["vx"], 0)
 
 # ─── Main ──────────────────────────────────────────────────────
 async def main(gps_cfg):
@@ -224,3 +227,29 @@ if __name__=="__main__":
     p.add_argument("--gps-service-config", type=Path, required=True)
     args = p.parse_args()
     asyncio.run(main(args.gps_service_config))
+
+
+
+
+
+
+
+
+
+    Init complete
+[VEL] -0.005, -0.017
+Traceback (most recent call last):
+  File "Mohammad2.py", line 229, in <module>
+    asyncio.run(main(args.gps_service_config))
+  File "/usr/lib/python3.8/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
+    return future.result()
+  File "Mohammad2.py", line 223, in main
+    await gps_stream(gps_cfg, bus)
+  File "Mohammad2.py", line 217, in gps_stream
+    await controller(bus, b, a, latest["vx"], 0)
+  File "Mohammad2.py", line 147, in controller
+    w1 = xx[i1] #if i1<len(xx) else None
+TypeError: 'NoneType' object is not subscriptable
+WARNING:can.bus:SocketcanBus was not properly shut down
